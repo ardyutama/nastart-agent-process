@@ -1,0 +1,63 @@
+{
+  "name": "dotnet-agent-skills",
+  "owner": {
+    "name": ".NET Team at Microsoft"
+  },
+  "plugins": [
+    {
+      "name": "dotnet",
+      "source": "./.github/skills/dotnet-skills/dotnet",
+      "description": "Collection of core .NET skills for handling common .NET coding tasks."
+    },
+    {
+      "name": "dotnet-data",
+      "source": "./.github/skills/dotnet-skills/dotnet-data",
+      "description": "Skills for .NET data access and Entity Framework related tasks."
+    },
+    {
+      "name": "dotnet-diag",
+      "source": "./.github/skills/dotnet-skills/dotnet-diag",
+      "description": "Skills for .NET performance investigations, debugging, and incident analysis."
+    },
+    {
+      "name": "dotnet-msbuild",
+      "source": "./.github/skills/dotnet-skills/dotnet-msbuild",
+      "description": "Comprehensive MSBuild and .NET build skills: failure diagnosis, performance optimization, code quality, and modernization."
+    },
+    {
+      "name": "dotnet-nuget",
+      "source": "./.github/skills/dotnet-skills/dotnet-nuget",
+      "description": "NuGet and .NET package management: dependency management and modernization."
+    },
+    {
+      "name": "dotnet-upgrade",
+      "source": "./.github/skills/dotnet-skills/dotnet-upgrade",
+      "description": "Skills for migrating and upgrading .NET projects across framework versions, language features, and compatibility targets."
+    },
+    {
+      "name": "dotnet-maui",
+      "source": "./.github/skills/dotnet-skills/dotnet-maui",
+      "description": "Skills for .NET MAUI development: environment setup, diagnostics, troubleshooting, navigation, data binding, dependency injection, layout, and theming."
+    },
+    {
+      "name": "dotnet-ai",
+      "source": "./.github/skills/dotnet-skills/dotnet-ai",
+      "description": "AI and ML skills for .NET: technology selection, LLM integration, agentic workflows, RAG pipelines, MCP, and classic ML with ML.NET."
+    },
+    {
+      "name": "dotnet-template-engine",
+      "source": "./.github/skills/dotnet-skills/dotnet-template-engine",
+      "description": ".NET Template Engine skills: template discovery, project scaffolding, and template authoring."
+    },
+    {
+      "name": "dotnet-test",
+      "source": "./.github/skills/dotnet-skills/dotnet-test",
+      "description": "Skills for running, diagnosing, and migrating .NET tests: test execution, filtering, platform detection, and MSTest workflows."
+    },
+    {
+      "name": "dotnet-aspnet",
+      "source": "./.github/skills/dotnet-skills/dotnet-aspnet",
+      "description": "ASP.NET Core web development skills including middleware, endpoints, real-time communication, and API patterns."
+    }
+  ]
+}
