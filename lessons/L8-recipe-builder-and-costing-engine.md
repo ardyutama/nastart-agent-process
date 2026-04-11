@@ -205,18 +205,18 @@ Creates a new recipe for this user. Initializes VersionGroupId and VersionNumber
 ### Folder structure
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Recipes/Commands/CreateRecipe
+mkdir -p src/Nastart.Application/Features/Recipes/Commands/CreateRecipe
 ```
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/CreateRecipe/CreateRecipeCommand.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/CreateRecipe/CreateRecipeCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.CreateRecipe;
+namespace Nastart.Application.Features.Recipes.Commands.CreateRecipe;
 
 public record CreateRecipeCommand(
     Guid UserId,
@@ -233,10 +233,10 @@ public record CreateRecipeItemDto(Guid IngredientId, decimal Quantity, decimal Y
 
 ### Response
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/CreateRecipe/CreateRecipeResponse.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/CreateRecipe/CreateRecipeResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Recipes.Commands.CreateRecipe;
+namespace Nastart.Application.Features.Recipes.Commands.CreateRecipe;
 
 public record CreateRecipeResponse(
     Guid Id,
@@ -250,12 +250,12 @@ public record CreateRecipeResponse(
 
 ### Validator
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/CreateRecipe/CreateRecipeCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/CreateRecipe/CreateRecipeCommandValidator.cs`
 
 ```csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.CreateRecipe;
+namespace Nastart.Application.Features.Recipes.Commands.CreateRecipe;
 
 public class CreateRecipeCommandValidator : AbstractValidator<CreateRecipeCommand>
 {
@@ -286,16 +286,16 @@ public class CreateRecipeCommandValidator : AbstractValidator<CreateRecipeComman
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/CreateRecipe/CreateRecipeHandler.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/CreateRecipe/CreateRecipeHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.CreateRecipe;
+namespace Nastart.Application.Features.Recipes.Commands.CreateRecipe;
 
 public class CreateRecipeHandler : IRequestHandler<CreateRecipeCommand, ErrorOr<CreateRecipeResponse>>
 {
@@ -402,18 +402,18 @@ Query all recipes for the authenticated user. Returns unified RecipeResponse DTO
 ### Folder structure
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Recipes/Queries/GetRecipes
+mkdir -p src/Nastart.Application/Features/Recipes/Queries/GetRecipes
 ```
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Queries/GetRecipes/GetRecipesQuery.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipes/GetRecipesQuery.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Recipes.Queries.GetRecipes;
+namespace Nastart.Application.Features.Recipes.Queries.GetRecipes;
 
 // v1: single user — no role parameter needed
 public record GetRecipesQuery(Guid UserId)
@@ -422,10 +422,10 @@ public record GetRecipesQuery(Guid UserId)
 
 ### Responses (Role-split)
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Queries/GetRecipes/RecipeResponse.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipes/RecipeResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Recipes.Queries.GetRecipes;
+namespace Nastart.Application.Features.Recipes.Queries.GetRecipes;
 
 // ❌ v2-only — RecipeOwnerResponse removed in v1. Use unified RecipeResponse below.
 
@@ -449,15 +449,15 @@ public record RecipeResponse(
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Queries/GetRecipes/GetRecipesHandler.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipes/GetRecipesHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Recipes.Queries.GetRecipes;
+namespace Nastart.Application.Features.Recipes.Queries.GetRecipes;
 
 public class GetRecipesHandler
     : IRequestHandler<GetRecipesQuery, ErrorOr<List<RecipeResponse>>>
@@ -507,18 +507,18 @@ Query a single recipe with RecipeItems details. Also role-split.
 ### Folder structure
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Recipes/Queries/GetRecipeById
+mkdir -p src/Nastart.Application/Features/Recipes/Queries/GetRecipeById
 ```
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Queries/GetRecipeById/GetRecipeByIdQuery.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipeById/GetRecipeByIdQuery.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Recipes.Queries.GetRecipeById;
+namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 
 public record GetRecipeByIdQuery(Guid RecipeId, Guid UserId)
     : IRequest<ErrorOr<RecipeResponse>>;
@@ -526,10 +526,10 @@ public record GetRecipeByIdQuery(Guid RecipeId, Guid UserId)
 
 ### Responses
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Queries/GetRecipeById/RecipeItemDetail.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipeById/RecipeItemDetail.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Recipes.Queries.GetRecipeById;
+namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 
 public record RecipeItemDetail(
     Guid RecipeItemId,
@@ -541,10 +541,10 @@ public record RecipeItemDetail(
 );
 ```
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Queries/GetRecipeById/RecipeByIdOwnerResponse.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipeById/RecipeByIdOwnerResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Recipes.Queries.GetRecipeById;
+namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 
 // ❌ v2-only — RecipeByIdOwnerResponse removed in v1. Use unified RecipeResponse below.
 
@@ -553,15 +553,15 @@ namespace RecipeCost.Application.Features.Recipes.Queries.GetRecipeById;
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Queries/GetRecipeById/GetRecipeByIdHandler.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipeById/GetRecipeByIdHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Recipes.Queries.GetRecipeById;
+namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 
 public class GetRecipeByIdHandler : IRequestHandler<GetRecipeByIdQuery, ErrorOr<RecipeResponse>>
 {
@@ -641,18 +641,18 @@ Adds an ingredient to an existing recipe.
 ### Folder structure
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Recipes/Commands/AddRecipeItem
+mkdir -p src/Nastart.Application/Features/Recipes/Commands/AddRecipeItem
 ```
 
 ### Request & Response
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/AddRecipeItem/AddRecipeItemCommand.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/AddRecipeItem/AddRecipeItemCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.AddRecipeItem;
+namespace Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
 
 public record AddRecipeItemCommand(
     Guid RecipeId,
@@ -663,10 +663,10 @@ public record AddRecipeItemCommand(
 ) : IRequest<ErrorOr<AddRecipeItemResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/AddRecipeItem/AddRecipeItemResponse.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/AddRecipeItem/AddRecipeItemResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Recipes.Commands.AddRecipeItem;
+namespace Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
 
 public record AddRecipeItemResponse(
     Guid RecipeItemId,
@@ -678,12 +678,12 @@ public record AddRecipeItemResponse(
 
 ### Validator
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/AddRecipeItem/AddRecipeItemCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/AddRecipeItem/AddRecipeItemCommandValidator.cs`
 
 ```csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.AddRecipeItem;
+namespace Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
 
 public class AddRecipeItemCommandValidator : AbstractValidator<AddRecipeItemCommand>
 {
@@ -702,16 +702,16 @@ public class AddRecipeItemCommandValidator : AbstractValidator<AddRecipeItemComm
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/AddRecipeItem/AddRecipeItemHandler.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/AddRecipeItem/AddRecipeItemHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.AddRecipeItem;
+namespace Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
 
 public class AddRecipeItemHandler : IRequestHandler<AddRecipeItemCommand, ErrorOr<AddRecipeItemResponse>>
 {
@@ -797,18 +797,18 @@ Removes an ingredient from a recipe.
 ### Folder structure
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Recipes/Commands/RemoveRecipeItem
+mkdir -p src/Nastart.Application/Features/Recipes/Commands/RemoveRecipeItem
 ```
 
 ### Request & Response
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/RemoveRecipeItem/RemoveRecipeItemCommand.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/RemoveRecipeItem/RemoveRecipeItemCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.RemoveRecipeItem;
+namespace Nastart.Application.Features.Recipes.Commands.RemoveRecipeItem;
 
 public record RemoveRecipeItemCommand(
     Guid RecipeItemId,
@@ -817,10 +817,10 @@ public record RemoveRecipeItemCommand(
 ) : IRequest<ErrorOr<RemoveRecipeItemResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/RemoveRecipeItem/RemoveRecipeItemResponse.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/RemoveRecipeItem/RemoveRecipeItemResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Recipes.Commands.RemoveRecipeItem;
+namespace Nastart.Application.Features.Recipes.Commands.RemoveRecipeItem;
 
 public record RemoveRecipeItemResponse(
     Guid RecipeId,
@@ -830,15 +830,15 @@ public record RemoveRecipeItemResponse(
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/RemoveRecipeItem/RemoveRecipeItemHandler.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/RemoveRecipeItem/RemoveRecipeItemHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.RemoveRecipeItem;
+namespace Nastart.Application.Features.Recipes.Commands.RemoveRecipeItem;
 
 public class RemoveRecipeItemHandler
     : IRequestHandler<RemoveRecipeItemCommand, ErrorOr<RemoveRecipeItemResponse>>
@@ -908,18 +908,18 @@ Creates a new version of a recipe, copying all RecipeItems. Same VersionGroupId,
 ### Folder structure
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Recipes/Commands/CreateRecipeVersion
+mkdir -p src/Nastart.Application/Features/Recipes/Commands/CreateRecipeVersion
 ```
 
 ### Request & Response
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/CreateRecipeVersion/CreateRecipeVersionCommand.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/CreateRecipeVersion/CreateRecipeVersionCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.CreateRecipeVersion;
+namespace Nastart.Application.Features.Recipes.Commands.CreateRecipeVersion;
 
 public record CreateRecipeVersionCommand(
     Guid SourceRecipeId,
@@ -928,10 +928,10 @@ public record CreateRecipeVersionCommand(
 ) : IRequest<ErrorOr<CreateRecipeVersionResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/CreateRecipeVersion/CreateRecipeVersionResponse.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/CreateRecipeVersion/CreateRecipeVersionResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Recipes.Commands.CreateRecipeVersion;
+namespace Nastart.Application.Features.Recipes.Commands.CreateRecipeVersion;
 
 public record CreateRecipeVersionResponse(
     Guid NewRecipeId,
@@ -943,16 +943,16 @@ public record CreateRecipeVersionResponse(
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/CreateRecipeVersion/CreateRecipeVersionHandler.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/CreateRecipeVersion/CreateRecipeVersionHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.CreateRecipeVersion;
+namespace Nastart.Application.Features.Recipes.Commands.CreateRecipeVersion;
 
 public class CreateRecipeVersionHandler
     : IRequestHandler<CreateRecipeVersionCommand, ErrorOr<CreateRecipeVersionResponse>>
@@ -1049,18 +1049,18 @@ Updates recipe metadata (name, portion count, selling price, threshold). Trigger
 ### Folder structure
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Recipes/Commands/UpdateRecipe
+mkdir -p src/Nastart.Application/Features/Recipes/Commands/UpdateRecipe
 ```
 
 ### Request & Response
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/UpdateRecipe/UpdateRecipeCommand.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/UpdateRecipe/UpdateRecipeCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.UpdateRecipe;
+namespace Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
 
 public record UpdateRecipeCommand(
     Guid RecipeId,
@@ -1073,10 +1073,10 @@ public record UpdateRecipeCommand(
 ) : IRequest<ErrorOr<UpdateRecipeResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/UpdateRecipe/UpdateRecipeResponse.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/UpdateRecipe/UpdateRecipeResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Recipes.Commands.UpdateRecipe;
+namespace Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
 
 public record UpdateRecipeResponse(
     Guid Id,
@@ -1087,12 +1087,12 @@ public record UpdateRecipeResponse(
 
 ### Validator
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/UpdateRecipe/UpdateRecipeCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/UpdateRecipe/UpdateRecipeCommandValidator.cs`
 
 ```csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.UpdateRecipe;
+namespace Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
 
 public class UpdateRecipeCommandValidator : AbstractValidator<UpdateRecipeCommand>
 {
@@ -1113,15 +1113,15 @@ public class UpdateRecipeCommandValidator : AbstractValidator<UpdateRecipeComman
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Recipes/Commands/UpdateRecipe/UpdateRecipeHandler.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Commands/UpdateRecipe/UpdateRecipeHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Recipes.Commands.UpdateRecipe;
+namespace Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
 
 public class UpdateRecipeHandler : IRequestHandler<UpdateRecipeCommand, ErrorOr<UpdateRecipeResponse>>
 {
@@ -1207,10 +1207,10 @@ All 7 slices wired to Minimal API endpoints. Extract role from JWT claims.
 
 ### Request DTOs (for minimal API binding)
 
-**File:** `src/RecipeCost.API/Contracts/Recipe/CreateRecipeRequest.cs`
+**File:** `src/Nastart.API/Contracts/Recipe/CreateRecipeRequest.cs`
 
 ```csharp
-namespace RecipeCost.API.Contracts.Recipe;
+namespace Nastart.API.Contracts.Recipe;
 
 public record CreateRecipeRequest(
     string Name,
@@ -1238,22 +1238,22 @@ public record CreateRecipeVersionRequest(string VersionLabel);
 
 ### Endpoints
 
-**File:** `src/RecipeCost.API/Endpoints/RecipeEndpoints.cs`
+**File:** `src/Nastart.API/Endpoints/RecipeEndpoints.cs`
 
 ```csharp
 using System.Security.Claims;
 using MediatR;
-using RecipeCost.API.Contracts.Recipe;
-using RecipeCost.API.Extensions;
-using RecipeCost.Application.Features.Recipes.Commands.AddRecipeItem;
-using RecipeCost.Application.Features.Recipes.Commands.CreateRecipe;
-using RecipeCost.Application.Features.Recipes.Commands.CreateRecipeVersion;
-using RecipeCost.Application.Features.Recipes.Commands.RemoveRecipeItem;
-using RecipeCost.Application.Features.Recipes.Commands.UpdateRecipe;
-using RecipeCost.Application.Features.Recipes.Queries.GetRecipeById;
-using RecipeCost.Application.Features.Recipes.Queries.GetRecipes;
+using Nastart.API.Contracts.Recipe;
+using Nastart.API.Extensions;
+using Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
+using Nastart.Application.Features.Recipes.Commands.CreateRecipe;
+using Nastart.Application.Features.Recipes.Commands.CreateRecipeVersion;
+using Nastart.Application.Features.Recipes.Commands.RemoveRecipeItem;
+using Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
+using Nastart.Application.Features.Recipes.Queries.GetRecipeById;
+using Nastart.Application.Features.Recipes.Queries.GetRecipes;
 
-namespace RecipeCost.API.Endpoints;
+namespace Nastart.API.Endpoints;
 
 public static class RecipeEndpoints
 {
@@ -1405,7 +1405,7 @@ public static class RecipeEndpoints
 
 ### Register endpoints and policies in Program.cs
 
-Update `src/RecipeCost.API/Program.cs` to add authorization policies:
+Update `src/Nastart.API/Program.cs` to add authorization policies:
 
 ```csharp
 // After builder.Services.AddAuthorization():
@@ -1673,15 +1673,15 @@ Across L6–L8, you now have:
 
 ### Key Test Cases
 
-**File:** `tests/RecipeCost.Application.Tests/Features/Recipes/GetRecipesHandlerTests.cs`
+**File:** `tests/Nastart.Application.Tests/Features/Recipes/GetRecipesHandlerTests.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Features.Recipes.Queries.GetRecipes;
-using RecipeCost.Domain.Entities;
-using RecipeCost.Infrastructure.Data;
+using Nastart.Application.Features.Recipes.Queries.GetRecipes;
+using Nastart.Domain.Entities;
+using Nastart.Infrastructure.Data;
 
-namespace RecipeCost.Application.Tests.Features.Recipes;
+namespace Nastart.Application.Tests.Features.Recipes;
 
 [TestClass]
 public sealed class GetRecipesHandlerTests
@@ -1714,17 +1714,17 @@ public sealed class GetRecipesHandlerTests
 }
 ```
 
-**File:** `tests/RecipeCost.Application.Tests/Features/Recipes/CreateRecipeHandlerTests.cs`
+**File:** `tests/Nastart.Application.Tests/Features/Recipes/CreateRecipeHandlerTests.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Application.Features.Recipes.Commands.CreateRecipe;
-using RecipeCost.Domain.Entities;
-using RecipeCost.Infrastructure.Data;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Application.Features.Recipes.Commands.CreateRecipe;
+using Nastart.Domain.Entities;
+using Nastart.Infrastructure.Data;
 
-namespace RecipeCost.Application.Tests.Features.Recipes;
+namespace Nastart.Application.Tests.Features.Recipes;
 
 [TestClass]
 public sealed class CreateRecipeHandlerTests
@@ -1763,10 +1763,10 @@ public sealed class CreateRecipeHandlerTests
 }
 ```
 
-**File:** `tests/RecipeCost.Application.Tests/Features/Recipes/DerivedSellPriceTests.cs`
+**File:** `tests/Nastart.Application.Tests/Features/Recipes/DerivedSellPriceTests.cs`
 
 ```csharp
-namespace RecipeCost.Application.Tests.Features.Recipes;
+namespace Nastart.Application.Tests.Features.Recipes;
 
 // Tests the sell price formula in isolation — no DB, no handlers, pure arithmetic
 [TestClass]
@@ -1827,13 +1827,13 @@ public sealed class DerivedSellPriceTests
 
 After completing L6, L7, and L8, your `Program.cs` should look like this. Every service registration, middleware, and endpoint map accumulated across L3–L8 is assembled here.
 
-**File:** `src/RecipeCost.API/Program.cs`
+**File:** `src/Nastart.API/Program.cs`
 
 ```csharp
-using RecipeCost.Application;
-using RecipeCost.Infrastructure;
-using RecipeCost.API.Endpoints;
-using RecipeCost.API.Middleware;
+using Nastart.Application;
+using Nastart.Infrastructure;
+using Nastart.API.Endpoints;
+using Nastart.API.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 

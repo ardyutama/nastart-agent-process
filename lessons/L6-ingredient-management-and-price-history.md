@@ -94,17 +94,17 @@ We'll build 7 handlers covering all ingredient operations. Each slice follows th
 This query returns all ingredients for this user, including each ingredient's **current price** (derived via C-3).
 
 ```
-mkdir -p src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredients
+mkdir -p src/Nastart.Application/Features/Ingredients/Queries/GetIngredients
 ```
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsQuery.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsQuery.cs`
 
 \`\`\`csharp
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredients;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
 // Query returns all ingredients for this user with their current prices
 // C-3: Current price is derived from latest IngredientPriceHistory record
@@ -113,10 +113,10 @@ public record GetIngredientsQuery(Guid UserId) : IRequest<List<GetIngredientsRes
 
 ### Response
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsResponse.cs`
 
 \`\`\`csharp
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredients;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
 // Summary DTO — only fields needed for ingredient list view
 public record IngredientSummary(
@@ -133,14 +133,14 @@ public record GetIngredientsResponse(List<IngredientSummary> Ingredients);
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsHandler.cs`
 
 \`\`\`csharp
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredients;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
 public class GetIngredientsHandler
     : IRequestHandler<GetIngredientsQuery, List<GetIngredientsResponse>>
@@ -194,17 +194,17 @@ public class GetIngredientsHandler
 Returns a single ingredient with full detail: unit, category, all metadata, and current price.
 
 \`\`\`
-mkdir -p src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredientById
+mkdir -p src/Nastart.Application/Features/Ingredients/Queries/GetIngredientById
 \`\`\`
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredientById/GetIngredientByIdQuery.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredientById/GetIngredientByIdQuery.cs`
 
 \`\`\`csharp
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredientById;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredientById;
 
 // Query fetches a single ingredient by ID, verifying user ownership
 public record GetIngredientByIdQuery(Guid IngredientId, Guid UserId) : IRequest<ErrorOr<GetIngredientByIdResponse>>;
@@ -212,10 +212,10 @@ public record GetIngredientByIdQuery(Guid IngredientId, Guid UserId) : IRequest<
 
 ### Response
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredientById/GetIngredientByIdResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredientById/GetIngredientByIdResponse.cs`
 
 \`\`\`csharp
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredientById;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredientById;
 
 // Full detail DTO
 public record UnitDto(Guid Id, string Name, string Abbreviation);
@@ -235,15 +235,15 @@ public record GetIngredientByIdResponse(
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredientById/GetIngredientByIdHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredientById/GetIngredientByIdHandler.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredientById;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredientById;
 
 public class GetIngredientByIdHandler
     : IRequestHandler<GetIngredientByIdQuery, ErrorOr<GetIngredientByIdResponse>>
@@ -300,18 +300,18 @@ public class GetIngredientByIdHandler
 Creates a new ingredient for an outlet. Optionally inserts the first price history record.
 
 \`\`\`
-mkdir -p src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient
+mkdir -p src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient
 \`\`\`
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientCommand.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientCommand.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 
 public record CreateIngredientCommand(
     Guid UserId,
@@ -327,22 +327,22 @@ public record CreateIngredientCommand(
 
 ### Response
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientResponse.cs`
 
 \`\`\`csharp
-namespace RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 
 public record CreateIngredientResponse(Guid Id, string Name);
 \`\`\`
 
 ### Validator
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientCommandValidator.cs`
 
 \`\`\`csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 
 public class CreateIngredientCommandValidator : AbstractValidator<CreateIngredientCommand>
 {
@@ -374,17 +374,17 @@ public class CreateIngredientCommandValidator : AbstractValidator<CreateIngredie
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientHandler.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
-using RecipeCost.Domain.Enums;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
+using Nastart.Domain.Enums;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 
 public class CreateIngredientHandler
     : IRequestHandler<CreateIngredientCommand, ErrorOr<CreateIngredientResponse>>
@@ -465,18 +465,18 @@ public class CreateIngredientHandler
 Updates ingredient metadata (name, category, unit, threshold). Does NOT update price — that goes through AddIngredientPrice.
 
 \`\`\`
-mkdir -p src/RecipeCost.Application/Features/Ingredients/Commands/UpdateIngredient
+mkdir -p src/Nastart.Application/Features/Ingredients/Commands/UpdateIngredient
 \`\`\`
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/UpdateIngredient/UpdateIngredientCommand.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/UpdateIngredient/UpdateIngredientCommand.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.UpdateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.UpdateIngredient;
 
 public record UpdateIngredientCommand(
     Guid IngredientId,
@@ -491,22 +491,22 @@ public record UpdateIngredientCommand(
 
 ### Response
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/UpdateIngredient/UpdateIngredientResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/UpdateIngredient/UpdateIngredientResponse.cs`
 
 \`\`\`csharp
-namespace RecipeCost.Application.Features.Ingredients.Commands.UpdateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.UpdateIngredient;
 
 public record UpdateIngredientResponse(Guid Id, string Name);
 \`\`\`
 
 ### Validator
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/UpdateIngredient/UpdateIngredientCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/UpdateIngredient/UpdateIngredientCommandValidator.cs`
 
 \`\`\`csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.UpdateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.UpdateIngredient;
 
 public class UpdateIngredientCommandValidator : AbstractValidator<UpdateIngredientCommand>
 {
@@ -534,15 +534,15 @@ public class UpdateIngredientCommandValidator : AbstractValidator<UpdateIngredie
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/UpdateIngredient/UpdateIngredientHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/UpdateIngredient/UpdateIngredientHandler.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.UpdateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.UpdateIngredient;
 
 public class UpdateIngredientHandler
     : IRequestHandler<UpdateIngredientCommand, ErrorOr<UpdateIngredientResponse>>
@@ -606,43 +606,43 @@ public class UpdateIngredientHandler
 Deletes an ingredient (Owner only). Note the future constraint from L7.
 
 \`\`\`
-mkdir -p src/RecipeCost.Application/Features/Ingredients/Commands/DeleteIngredient
+mkdir -p src/Nastart.Application/Features/Ingredients/Commands/DeleteIngredient
 \`\`\`
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/DeleteIngredient/DeleteIngredientCommand.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/DeleteIngredient/DeleteIngredientCommand.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.DeleteIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.DeleteIngredient;
 
 public record DeleteIngredientCommand(Guid IngredientId, Guid UserId) : IRequest<ErrorOr<DeleteIngredientResponse>>;
 \`\`\`
 
 ### Response
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/DeleteIngredient/DeleteIngredientResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/DeleteIngredient/DeleteIngredientResponse.cs`
 
 \`\`\`csharp
-namespace RecipeCost.Application.Features.Ingredients.Commands.DeleteIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.DeleteIngredient;
 
 public record DeleteIngredientResponse(Guid Id);
 \`\`\`
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/DeleteIngredient/DeleteIngredientHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/DeleteIngredient/DeleteIngredientHandler.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.DeleteIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.DeleteIngredient;
 
 public class DeleteIngredientHandler
     : IRequestHandler<DeleteIngredientCommand, ErrorOr<DeleteIngredientResponse>>
@@ -687,18 +687,18 @@ public class DeleteIngredientHandler
 Adds a new price history record. This is the primary way prices update. The record is append-only and permanent.
 
 \`\`\`
-mkdir -p src/RecipeCost.Application/Features/Ingredients/Commands/AddIngredientPrice
+mkdir -p src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice
 \`\`\`
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommand.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommand.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.AddIngredientPrice;
+namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
 public record AddIngredientPriceCommand(
     Guid IngredientId,
@@ -710,10 +710,10 @@ public record AddIngredientPriceCommand(
 
 ### Response
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceResponse.cs`
 
 \`\`\`csharp
-namespace RecipeCost.Application.Features.Ingredients.Commands.AddIngredientPrice;
+namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
 public record AddIngredientPriceResponse(
     Guid IngredientId,
@@ -725,12 +725,12 @@ public record AddIngredientPriceResponse(
 
 ### Validator
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommandValidator.cs`
 
 \`\`\`csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.AddIngredientPrice;
+namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
 public class AddIngredientPriceCommandValidator : AbstractValidator<AddIngredientPriceCommand>
 {
@@ -745,17 +745,17 @@ public class AddIngredientPriceCommandValidator : AbstractValidator<AddIngredien
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceHandler.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
-using RecipeCost.Domain.Enums;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
+using Nastart.Domain.Enums;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.AddIngredientPrice;
+namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
 public class AddIngredientPriceHandler
     : IRequestHandler<AddIngredientPriceCommand, ErrorOr<AddIngredientPriceResponse>>
@@ -827,17 +827,17 @@ public class AddIngredientPriceHandler
 Returns the complete price history for an ingredient, ordered from newest to oldest.
 
 \`\`\`
-mkdir -p src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredientPriceHistory
+mkdir -p src/Nastart.Application/Features/Ingredients/Queries/GetIngredientPriceHistory
 \`\`\`
 
 ### Request
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredientPriceHistory/GetIngredientPriceHistoryQuery.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredientPriceHistory/GetIngredientPriceHistoryQuery.cs`
 
 \`\`\`csharp
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredientPriceHistory;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredientPriceHistory;
 
 public record GetIngredientPriceHistoryQuery(Guid IngredientId, Guid UserId)
     : IRequest<ErrorOr<GetIngredientPriceHistoryResponse>>;
@@ -845,10 +845,10 @@ public record GetIngredientPriceHistoryQuery(Guid IngredientId, Guid UserId)
 
 ### Response
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredientPriceHistory/GetIngredientPriceHistoryResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredientPriceHistory/GetIngredientPriceHistoryResponse.cs`
 
 \`\`\`csharp
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredientPriceHistory;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredientPriceHistory;
 
 public record PriceHistoryEntry(
     Guid Id,
@@ -867,15 +867,15 @@ public record GetIngredientPriceHistoryResponse(
 
 ### Handler
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredientPriceHistory/GetIngredientPriceHistoryHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredientPriceHistory/GetIngredientPriceHistoryHandler.cs`
 
 \`\`\`csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredientPriceHistory;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredientPriceHistory;
 
 public class GetIngredientPriceHistoryHandler
     : IRequestHandler<GetIngredientPriceHistoryQuery, ErrorOr<GetIngredientPriceHistoryResponse>>
@@ -928,21 +928,21 @@ public class GetIngredientPriceHistoryHandler
 
 Create one unified endpoint file for all ingredient routes. This follows the MapGroup pattern from L5.
 
-**File:** `src/RecipeCost.API/Endpoints/IngredientEndpoints.cs`
+**File:** `src/Nastart.API/Endpoints/IngredientEndpoints.cs`
 
 \`\`\`csharp
 using System.Security.Claims;
 using MediatR;
-using RecipeCost.API.Extensions;
-using RecipeCost.Application.Features.Ingredients.Commands.AddIngredientPrice;
-using RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
-using RecipeCost.Application.Features.Ingredients.Commands.DeleteIngredient;
-using RecipeCost.Application.Features.Ingredients.Commands.UpdateIngredient;
-using RecipeCost.Application.Features.Ingredients.Queries.GetIngredientById;
-using RecipeCost.Application.Features.Ingredients.Queries.GetIngredientPriceHistory;
-using RecipeCost.Application.Features.Ingredients.Queries.GetIngredients;
+using Nastart.API.Extensions;
+using Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
+using Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
+using Nastart.Application.Features.Ingredients.Commands.DeleteIngredient;
+using Nastart.Application.Features.Ingredients.Commands.UpdateIngredient;
+using Nastart.Application.Features.Ingredients.Queries.GetIngredientById;
+using Nastart.Application.Features.Ingredients.Queries.GetIngredientPriceHistory;
+using Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
-namespace RecipeCost.API.Endpoints;
+namespace Nastart.API.Endpoints;
 
 public static class IngredientEndpoints
 {
@@ -1307,13 +1307,13 @@ curl -X GET "http://localhost:5000/api/ingredients"
 **To save this file:**
 
 1. Copy the markdown block above
-2. Create the file at `/Users/ardyputrautama/Downloads/personas/lessons/L6-ingredient-management-and-price-history.md`
+2. Create the file at `lessons/L6-ingredient-management-and-price-history.md` inside your project folder
 3. Paste the content
 
 Alternatively, in your terminal:
 ```bash
 # Create and save the file
-cat > /Users/ardyputrautama/Downloads/personas/lessons/L6-ingredient-management-and-price-history.md << 'LESSON_EOF'
+cat > lessons/L6-ingredient-management-and-price-history.md << 'LESSON_EOF'
 [paste the complete markdown content from above]
 LESSON_EOF
 ```

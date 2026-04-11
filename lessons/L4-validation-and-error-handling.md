@@ -48,7 +48,7 @@ Using exceptions for business logic means:
 `ErrorOr<T>` is a library that makes handlers return either a **success value** or a **list of errors** — no exceptions needed.
 
 ```bash
-dotnet add src/RecipeCost.Application package ErrorOr
+dotnet add src/Nastart.Application package ErrorOr
 ```
 
 How it works:
@@ -88,18 +88,18 @@ public async Task<ErrorOr<CreateIngredientResponse>> Handle(...)
 Let's build `CreateIngredient` — the first full slice with validation and error handling.
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient
+mkdir -p src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient
 ```
 
 ### The Command
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientCommand.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 
 // Returns ErrorOr — handler can return success OR typed errors
 public record CreateIngredientCommand(
@@ -116,27 +116,27 @@ public record CreateIngredientCommand(
 
 ### The Response
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 
 public record CreateIngredientResponse(Guid Id, string Name);
 ```
 
 ### The Handler
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
-using RecipeCost.Domain.Enums;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
+using Nastart.Domain.Enums;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 
 public class CreateIngredientHandler
     : IRequestHandler<CreateIngredientCommand, ErrorOr<CreateIngredientResponse>>
@@ -208,18 +208,18 @@ public class CreateIngredientHandler
 FluentValidation lets you define validation rules as a class, separate from your handler. Rules fire before the handler executes.
 
 ```bash
-dotnet add src/RecipeCost.Application package FluentValidation
-dotnet add src/RecipeCost.Application package FluentValidation.DependencyInjectionExtensions
+dotnet add src/Nastart.Application package FluentValidation
+dotnet add src/Nastart.Application package FluentValidation.DependencyInjectionExtensions
 ```
 
 ### Validator for CreateIngredient
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/CreateIngredient/CreateIngredientCommandValidator.cs`
 
 ```csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
+namespace Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 
 public class CreateIngredientCommandValidator : AbstractValidator<CreateIngredientCommand>
 {
@@ -254,14 +254,14 @@ public class CreateIngredientCommandValidator : AbstractValidator<CreateIngredie
 
 A Pipeline Behavior is middleware that intercepts every MediatR request before the handler runs. We'll create one that finds the validator for the current request and runs it automatically.
 
-**File:** `src/RecipeCost.Application/Common/Behaviors/ValidationBehavior.cs`
+**File:** `src/Nastart.Application/Common/Behaviors/ValidationBehavior.cs`
 
 ```csharp
 using ErrorOr;
 using FluentValidation;
 using MediatR;
 
-namespace RecipeCost.Application.Common.Behaviors;
+namespace Nastart.Application.Common.Behaviors;
 
 // This behavior intercepts every MediatR request.
 // If a validator exists for the request type, it runs BEFORE the handler.
@@ -307,14 +307,14 @@ public class ValidationBehavior<TRequest, TResponse>
 
 ### Register validators and behavior in DI
 
-Update `src/RecipeCost.Application/DependencyInjection.cs`:
+Update `src/Nastart.Application/DependencyInjection.cs`:
 
 ```csharp
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
-using RecipeCost.Application.Common.Behaviors;
+using Nastart.Application.Common.Behaviors;
 
-namespace RecipeCost.Application;
+namespace Nastart.Application;
 
 public static class DependencyInjection
 {
@@ -358,12 +358,12 @@ HTTP Request
 
 Endpoints need to translate `ErrorOr<T>` results into proper HTTP responses. Create a helper:
 
-**File:** `src/RecipeCost.API/Extensions/ResultExtensions.cs`
+**File:** `src/Nastart.API/Extensions/ResultExtensions.cs`
 
 ```csharp
 using ErrorOr;
 
-namespace RecipeCost.API.Extensions;
+namespace Nastart.API.Extensions;
 
 public static class ResultExtensions
 {
@@ -406,15 +406,15 @@ public static class ResultExtensions
 
 ### Update the Ingredient endpoint
 
-**File:** `src/RecipeCost.API/Endpoints/IngredientEndpoints.cs`
+**File:** `src/Nastart.API/Endpoints/IngredientEndpoints.cs`
 
 ```csharp
 using MediatR;
-using RecipeCost.API.Extensions;
-using RecipeCost.Application.Features.Ingredients.Commands.CreateIngredient;
-using RecipeCost.Application.Features.Ingredients.Queries.GetIngredients;
+using Nastart.API.Extensions;
+using Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
+using Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
-namespace RecipeCost.API.Endpoints;
+namespace Nastart.API.Endpoints;
 
 public static class IngredientEndpoints
 {
@@ -467,13 +467,13 @@ public record CreateIngredientRequest(
 
 For truly unexpected errors (database connection lost, null reference), add a global handler as a safety net:
 
-**File:** `src/RecipeCost.API/Middleware/GlobalExceptionHandler.cs`
+**File:** `src/Nastart.API/Middleware/GlobalExceptionHandler.cs`
 
 ```csharp
 using System.Net;
 using Microsoft.AspNetCore.Diagnostics;
 
-namespace RecipeCost.API.Middleware;
+namespace Nastart.API.Middleware;
 
 public class GlobalExceptionHandler : IExceptionHandler
 {
@@ -510,7 +510,7 @@ public class GlobalExceptionHandler : IExceptionHandler
 Register in `Program.cs`:
 
 ```csharp
-using RecipeCost.API.Middleware;
+using Nastart.API.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -562,7 +562,7 @@ No try-catch blocks in your handlers. No exceptions thrown for business logic. C
 dotnet build
 
 # 2. Start API
-dotnet run --project src/RecipeCost.API
+dotnet run --project src/Nastart.API
 
 # 3. Test validation — empty name should fail with 400
 curl -X POST http://localhost:5000/api/ingredients \

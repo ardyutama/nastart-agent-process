@@ -33,10 +33,10 @@ Clean Architecture organizes your code into layers (rings). The fundamental rule
 
 | Project | Contains | May Reference |
 |---|---|---|
-| `RecipeCost.Domain` | Entity classes, enums, value objects, domain interfaces (e.g. `IIngredientRepository`) | Nothing — this is the innermost ring |
-| `RecipeCost.Application` | Feature slices (Commands, Queries, Handlers), DTOs, service interfaces (e.g. `ICostCascadeService`), validation rules | Domain only |
-| `RecipeCost.Infrastructure` | EF Core `DbContext`, repository implementations, external service clients (email, file storage), service implementations | Domain + Application |
-| `RecipeCost.API` | `Program.cs`, Minimal API endpoint definitions, middleware, DI wiring, configuration | Domain + Application + Infrastructure |
+| `Nastart.Domain` | Entity classes, enums, value objects, domain interfaces (e.g. `IIngredientRepository`) | Nothing — this is the innermost ring |
+| `Nastart.Application` | Feature slices (Commands, Queries, Handlers), DTOs, service interfaces (e.g. `ICostCascadeService`), validation rules | Domain only |
+| `Nastart.Infrastructure` | EF Core `DbContext`, repository implementations, external service clients (email, file storage), service implementations | Domain + Application |
+| `Nastart.API` | `Program.cs`, Minimal API endpoint definitions, middleware, DI wiring, configuration | Domain + Application + Infrastructure |
 
 ### Why this matters for your recipe costing app
 
@@ -144,31 +144,31 @@ Every `Add*()` call is registering a service into the DI container. Now you know
 mkdir nastart && cd nastart
 
 # Create the solution file
-dotnet new sln -n RecipeCost
+dotnet new sln -n Nastart
 
 # Create the 4 projects
-dotnet new classlib -n RecipeCost.Domain -o src/RecipeCost.Domain --framework net10.0
-dotnet new classlib -n RecipeCost.Application -o src/RecipeCost.Application --framework net10.0
-dotnet new classlib -n RecipeCost.Infrastructure -o src/RecipeCost.Infrastructure --framework net10.0
-dotnet new webapi -n RecipeCost.API -o src/RecipeCost.API --framework net10.0
+dotnet new classlib -n Nastart.Domain -o src/Nastart.Domain --framework net10.0
+dotnet new classlib -n Nastart.Application -o src/Nastart.Application --framework net10.0
+dotnet new classlib -n Nastart.Infrastructure -o src/Nastart.Infrastructure --framework net10.0
+dotnet new webapi -n Nastart.API -o src/Nastart.API --framework net10.0
 
 # Add all projects to the solution
-dotnet sln add src/RecipeCost.Domain
-dotnet sln add src/RecipeCost.Application
-dotnet sln add src/RecipeCost.Infrastructure
-dotnet sln add src/RecipeCost.API
+dotnet sln add src/Nastart.Domain
+dotnet sln add src/Nastart.Application
+dotnet sln add src/Nastart.Infrastructure
+dotnet sln add src/Nastart.API
 
 # Create the test project (TDD is a project requirement — tests live here)
-dotnet new xunit -n RecipeCost.Tests -o tests/RecipeCost.Tests --framework net10.0
-dotnet sln add tests/RecipeCost.Tests
+dotnet new xunit -n Nastart.Tests -o tests/Nastart.Tests --framework net10.0
+dotnet sln add tests/Nastart.Tests
 
 # Test project references Application (most unit tests hit handlers and services)
-dotnet add tests/RecipeCost.Tests reference src/RecipeCost.Application
-dotnet add tests/RecipeCost.Tests reference src/RecipeCost.Domain
+dotnet add tests/Nastart.Tests reference src/Nastart.Application
+dotnet add tests/Nastart.Tests reference src/Nastart.Domain
 
 # Add test helper packages
-dotnet add tests/RecipeCost.Tests package FluentAssertions
-dotnet add tests/RecipeCost.Tests package NSubstitute
+dotnet add tests/Nastart.Tests package FluentAssertions
+dotnet add tests/Nastart.Tests package NSubstitute
 ```
 
 > **Test framework — xUnit vs MSTest.Sdk:** This project uses **xUnit**. For new .NET projects, the current best-practice recommendation is **MSTest.Sdk** (`<Sdk Name="MSTest.Sdk">`): it requires fewer package references, supports sealed test classes for performance, and provides richer built-in assertions (`Assert.ThrowsExactly`, `Assert.HasCount`, `Assert.ContainsSingle`) without an additional library. xUnit is kept here because it pairs naturally with FluentAssertions and NSubstitute, which are already part of this setup. If you prefer MSTest, replace `dotnet new xunit` with `dotnet new mstest`, swap `[Fact]` for `[TestMethod]`/`[TestClass]`, and remove the FluentAssertions package in favour of MSTest's native assertions. Both frameworks have full `dotnet test`, VS Test Explorer, and GitHub Actions support.
@@ -181,16 +181,16 @@ This is where Clean Architecture is enforced. References ONLY point inward:
 
 ```bash
 # Application depends on Domain
-dotnet add src/RecipeCost.Application reference src/RecipeCost.Domain
+dotnet add src/Nastart.Application reference src/Nastart.Domain
 
 # Infrastructure depends on Domain + Application
-dotnet add src/RecipeCost.Infrastructure reference src/RecipeCost.Domain
-dotnet add src/RecipeCost.Infrastructure reference src/RecipeCost.Application
+dotnet add src/Nastart.Infrastructure reference src/Nastart.Domain
+dotnet add src/Nastart.Infrastructure reference src/Nastart.Application
 
 # API depends on all (it's the outermost ring — it wires everything)
-dotnet add src/RecipeCost.API reference src/RecipeCost.Domain
-dotnet add src/RecipeCost.API reference src/RecipeCost.Application
-dotnet add src/RecipeCost.API reference src/RecipeCost.Infrastructure
+dotnet add src/Nastart.API reference src/Nastart.Domain
+dotnet add src/Nastart.API reference src/Nastart.Application
+dotnet add src/Nastart.API reference src/Nastart.Infrastructure
 ```
 
 **What you must NEVER do:** Add a reference from Domain to Application, Infrastructure, or API. Domain references nothing.
@@ -199,20 +199,20 @@ dotnet add src/RecipeCost.API reference src/RecipeCost.Infrastructure
 
 ```
 nastart/
-├── RecipeCost.sln
+├── Nastart.sln
 ├── src/
-│   ├── RecipeCost.Domain/            ← innermost ring
-│   │   └── RecipeCost.Domain.csproj
-│   ├── RecipeCost.Application/       ← business logic ring
-│   │   └── RecipeCost.Application.csproj
-│   ├── RecipeCost.Infrastructure/    ← data access ring
-│   │   └── RecipeCost.Infrastructure.csproj
-│   └── RecipeCost.API/               ← outermost ring
-│       ├── RecipeCost.API.csproj
+│   ├── Nastart.Domain/            ← innermost ring
+│   │   └── Nastart.Domain.csproj
+│   ├── Nastart.Application/       ← business logic ring
+│   │   └── Nastart.Application.csproj
+│   ├── Nastart.Infrastructure/    ← data access ring
+│   │   └── Nastart.Infrastructure.csproj
+│   └── Nastart.API/               ← outermost ring
+│       ├── Nastart.API.csproj
 │       └── Program.cs
 └── tests/
-    └── RecipeCost.Tests/             ← unit tests (xUnit + FluentAssertions + NSubstitute)
-        └── RecipeCost.Tests.csproj
+    └── Nastart.Tests/             ← unit tests (xUnit + FluentAssertions + NSubstitute)
+        └── Nastart.Tests.csproj
 ```
 
 ### Clean up template files
@@ -220,12 +220,12 @@ nastart/
 Delete the auto-generated `Class1.cs` from the class library projects and the template weather forecast code from API:
 
 ```bash
-rm src/RecipeCost.Domain/Class1.cs
-rm src/RecipeCost.Application/Class1.cs
-rm src/RecipeCost.Infrastructure/Class1.cs
+rm src/Nastart.Domain/Class1.cs
+rm src/Nastart.Application/Class1.cs
+rm src/Nastart.Infrastructure/Class1.cs
 ```
 
-In `src/RecipeCost.API/Program.cs`, replace the template content with a clean starting point:
+In `src/Nastart.API/Program.cs`, replace the template content with a clean starting point:
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -247,7 +247,7 @@ app.Run();
 dotnet build
 
 # Run the API project
-dotnet run --project src/RecipeCost.API
+dotnet run --project src/Nastart.API
 
 # In another terminal, test the health endpoint
 curl http://localhost:5000/health
@@ -260,7 +260,7 @@ curl http://localhost:5000/health
 
 ### Create global.json to pin the .NET SDK version
 
-**File:** `global.json` (project root, next to `RecipeCost.sln`)
+**File:** `global.json` (project root, next to `Nastart.sln`)
 
 ```json
 {
@@ -277,7 +277,7 @@ Without `global.json`, a developer with .NET 9 installed will scaffold `net9.0` 
 
 ### Create Directory.Build.props to share settings across all 4 projects
 
-**File:** `Directory.Build.props` (project root, next to `RecipeCost.sln`)
+**File:** `Directory.Build.props` (project root, next to `Nastart.sln`)
 
 ```xml
 <Project>
@@ -308,9 +308,9 @@ Set up these folders now — they'll be populated in the coming lessons:
 ### Domain project
 
 ```bash
-mkdir -p src/RecipeCost.Domain/Entities
-mkdir -p src/RecipeCost.Domain/Enums
-mkdir -p src/RecipeCost.Domain/Common
+mkdir -p src/Nastart.Domain/Entities
+mkdir -p src/Nastart.Domain/Enums
+mkdir -p src/Nastart.Domain/Common
 ```
 
 - `Entities/` — your C# entity classes (`Ingredient.cs`, `User.cs`, etc.)
@@ -320,8 +320,8 @@ mkdir -p src/RecipeCost.Domain/Common
 ### Application project
 
 ```bash
-mkdir -p src/RecipeCost.Application/Common/Interfaces
-mkdir -p src/RecipeCost.Application/Common/Behaviors
+mkdir -p src/Nastart.Application/Common/Interfaces
+mkdir -p src/Nastart.Application/Common/Behaviors
 ```
 
 - `Common/Interfaces/` — service interfaces like `IAppDbContext`
@@ -331,8 +331,8 @@ mkdir -p src/RecipeCost.Application/Common/Behaviors
 ### Infrastructure project
 
 ```bash
-mkdir -p src/RecipeCost.Infrastructure/Persistence
-mkdir -p src/RecipeCost.Infrastructure/Services
+mkdir -p src/Nastart.Infrastructure/Persistence
+mkdir -p src/Nastart.Infrastructure/Services
 ```
 
 - `Persistence/` — `AppDbContext`, entity configurations, migrations
@@ -341,8 +341,8 @@ mkdir -p src/RecipeCost.Infrastructure/Services
 ### API project
 
 ```bash
-mkdir -p src/RecipeCost.API/Endpoints
-mkdir -p src/RecipeCost.API/Extensions
+mkdir -p src/Nastart.API/Endpoints
+mkdir -p src/Nastart.API/Extensions
 ```
 
 - `Endpoints/` — Minimal API endpoint groups
@@ -354,10 +354,10 @@ mkdir -p src/RecipeCost.API/Extensions
 
 Every entity in our database shares common fields. Create a base class:
 
-**File:** `src/RecipeCost.Domain/Common/BaseEntity.cs`
+**File:** `src/Nastart.Domain/Common/BaseEntity.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Common;
+namespace Nastart.Domain.Common;
 
 public abstract class BaseEntity
 {
@@ -376,17 +376,17 @@ All entities will inherit from this. EF Core will map `Id` as the primary key, a
 Before writing handlers in L3+, verify the test infrastructure works. Create one smoke test to confirm xUnit, NSubstitute, and FluentAssertions are correctly wired together.
 
 ```bash
-mkdir tests/RecipeCost.Tests/Smoke
+mkdir tests/Nastart.Tests/Smoke
 ```
 
-**File:** `tests/RecipeCost.Tests/Smoke/InfrastructureSmokeTest.cs`
+**File:** `tests/Nastart.Tests/Smoke/InfrastructureSmokeTest.cs`
 
 ```csharp
 using FluentAssertions;
 using NSubstitute;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Tests.Smoke;
+namespace Nastart.Tests.Smoke;
 
 public class InfrastructureSmokeTest
 {
@@ -404,9 +404,9 @@ public class InfrastructureSmokeTest
 ```
 
 ```bash
-dotnet test tests/RecipeCost.Tests
+dotnet test tests/Nastart.Tests
 # Expected output includes: "1 passed"
-# Test name: RecipeCost.Tests.Smoke.InfrastructureSmokeTest.TestInfrastructure_ShouldWork
+# Test name: Nastart.Tests.Smoke.InfrastructureSmokeTest.TestInfrastructure_ShouldWork
 ```
 
 > **What this proves:** xUnit discovered the test, NSubstitute created a mock of `IAppDbContext`, and FluentAssertions made an assertion without crashing. TDD infrastructure is ready.
@@ -419,13 +419,13 @@ dotnet test tests/RecipeCost.Tests
 
 This interface lives in Application (not Infrastructure) so that handlers can depend on it without knowing about EF Core:
 
-**File:** `src/RecipeCost.Application/Common/Interfaces/IAppDbContext.cs`
+**File:** `src/Nastart.Application/Common/Interfaces/IAppDbContext.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Application.Common.Interfaces;
+namespace Nastart.Application.Common.Interfaces;
 
 // Handlers depend on this interface — they never see AppDbContext directly.
 // This keeps the Application layer free of Infrastructure concerns.
@@ -454,21 +454,21 @@ Run these checks:
 dotnet build
 
 # 2. API starts and responds
-dotnet run --project src/RecipeCost.API
+dotnet run --project src/Nastart.API
 # curl http://localhost:5000/health → {"status":"healthy"}
 
 # 3. Verify project references are correct
-dotnet list src/RecipeCost.Domain/RecipeCost.Domain.csproj reference
+dotnet list src/Nastart.Domain/Nastart.Domain.csproj reference
 # Should show: (empty — Domain references nothing)
 
-dotnet list src/RecipeCost.Application/RecipeCost.Application.csproj reference
-# Should show: RecipeCost.Domain
+dotnet list src/Nastart.Application/Nastart.Application.csproj reference
+# Should show: Nastart.Domain
 
-dotnet list src/RecipeCost.Infrastructure/RecipeCost.Infrastructure.csproj reference
-# Should show: RecipeCost.Domain, RecipeCost.Application
+dotnet list src/Nastart.Infrastructure/Nastart.Infrastructure.csproj reference
+# Should show: Nastart.Domain, Nastart.Application
 
-dotnet list src/RecipeCost.API/RecipeCost.API.csproj reference
-# Should show: RecipeCost.Domain, RecipeCost.Application, RecipeCost.Infrastructure
+dotnet list src/Nastart.API/Nastart.API.csproj reference
+# Should show: Nastart.Domain, Nastart.Application, Nastart.Infrastructure
 ```
 
 If all 3 pass, your Clean Architecture foundation is solid. Move to L2.

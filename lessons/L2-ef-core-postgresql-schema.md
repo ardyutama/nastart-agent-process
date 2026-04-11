@@ -69,7 +69,7 @@ docker compose ps
 
 ### Connection string
 
-**File:** `src/RecipeCost.API/appsettings.json`
+**File:** `src/Nastart.API/appsettings.json`
 
 ```json
 {
@@ -93,14 +93,14 @@ docker compose ps
 
 ```bash
 # Infrastructure needs EF Core + Npgsql (PostgreSQL provider)
-dotnet add src/RecipeCost.Infrastructure package Microsoft.EntityFrameworkCore
-dotnet add src/RecipeCost.Infrastructure package Npgsql.EntityFrameworkCore.PostgreSQL
+dotnet add src/Nastart.Infrastructure package Microsoft.EntityFrameworkCore
+dotnet add src/Nastart.Infrastructure package Npgsql.EntityFrameworkCore.PostgreSQL
 
 # API needs the EF Core design-time tools for migrations
-dotnet add src/RecipeCost.API package Microsoft.EntityFrameworkCore.Design
+dotnet add src/Nastart.API package Microsoft.EntityFrameworkCore.Design
 
 # Application needs EF Core for DbSet<T> reference in IAppDbContext
-dotnet add src/RecipeCost.Application package Microsoft.EntityFrameworkCore
+dotnet add src/Nastart.Application package Microsoft.EntityFrameworkCore
 ```
 
 Install the EF Core CLI tool globally (if not already):
@@ -117,10 +117,10 @@ Before creating entities, define the enums they depend on.
 
 > ⚠️ **v2-only — do not build in v1.** Roles are introduced when the product expands to multi-user teams.
 
-**File:** `src/RecipeCost.Domain/Enums/Role.cs`
+**File:** `src/Nastart.Domain/Enums/Role.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Enums;
+namespace Nastart.Domain.Enums;
 
 // Canonical Decision C-8: Exactly 4 roles — no Admin, no Manager, no Superuser
 public enum Role
@@ -132,10 +132,10 @@ public enum Role
 }
 ```
 
-**File:** `src/RecipeCost.Domain/Enums/TelegramLinkStatus.cs`
+**File:** `src/Nastart.Domain/Enums/TelegramLinkStatus.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Enums;
+namespace Nastart.Domain.Enums;
 
 // Canonical Decision C-6: TelegramLink lifecycle states
 public enum TelegramLinkStatus
@@ -148,10 +148,10 @@ public enum TelegramLinkStatus
 
 > ⚠️ **v2-only — do not build in v1.** Invitations do not exist in the single-user v1 product.
 
-**File:** `src/RecipeCost.Domain/Enums/InvitationStatus.cs`
+**File:** `src/Nastart.Domain/Enums/InvitationStatus.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Enums;
+namespace Nastart.Domain.Enums;
 
 public enum InvitationStatus
 {
@@ -161,10 +161,10 @@ public enum InvitationStatus
 }
 ```
 
-**File:** `src/RecipeCost.Domain/Enums/PriceSource.cs`
+**File:** `src/Nastart.Domain/Enums/PriceSource.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Enums;
+namespace Nastart.Domain.Enums;
 
 // Canonical Decision C-13: Exactly these two values, case-sensitive
 // EF Core will store these as strings: "Manual", "InvoiceScan"
@@ -175,10 +175,10 @@ public enum PriceSource
 }
 ```
 
-**File:** `src/RecipeCost.Domain/Enums/InvoiceStatus.cs`
+**File:** `src/Nastart.Domain/Enums/InvoiceStatus.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Enums;
+namespace Nastart.Domain.Enums;
 
 // Forward-declared for Phase 3 — Invoice entity references this in L2
 // but invoice processing logic is built in L12–L14
@@ -195,18 +195,18 @@ public enum InvoiceStatus
 
 ## 4. Domain Entities — All 11 for Phase 1
 
-Each entity inherits from `BaseEntity` (created in L1). All live in `src/RecipeCost.Domain/Entities/`.
+Each entity inherits from `BaseEntity` (created in L1). All live in `src/Nastart.Domain/Entities/`.
 
 ### Company
 
 > ⚠️ **v2-only — do not build in v1.** Company hierarchy is introduced when the product expands to multi-outlet teams.
 
-**File:** `src/RecipeCost.Domain/Entities/Company.cs`
+**File:** `src/Nastart.Domain/Entities/Company.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 public class Company : BaseEntity
 {
@@ -223,12 +223,12 @@ public class Company : BaseEntity
 
 > ⚠️ **v2-only — do not build in v1.**
 
-**File:** `src/RecipeCost.Domain/Entities/Outlet.cs`
+**File:** `src/Nastart.Domain/Entities/Outlet.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 public class Outlet : BaseEntity
 {
@@ -246,12 +246,12 @@ public class Outlet : BaseEntity
 
 ### User
 
-**File:** `src/RecipeCost.Domain/Entities/User.cs`
+**File:** `src/Nastart.Domain/Entities/User.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 // Canonical Decision C-6: User has NO telegram_user_id column.
 // All Telegram identity lives on TelegramLink only.
@@ -274,13 +274,13 @@ public class User : BaseEntity
 
 > ⚠️ **v2-only — do not build in v1.**
 
-**File:** `src/RecipeCost.Domain/Entities/OutletUser.cs`
+**File:** `src/Nastart.Domain/Entities/OutletUser.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
-using RecipeCost.Domain.Enums;
+using Nastart.Domain.Common;
+using Nastart.Domain.Enums;
 
 // A user can belong to multiple outlets with DIFFERENT roles at each.
 // The role is per-outlet, not per-user.
@@ -301,13 +301,13 @@ public class OutletUser : BaseEntity
 
 > ⚠️ **v2-only — do not build in v1.**
 
-**File:** `src/RecipeCost.Domain/Entities/Invitation.cs`
+**File:** `src/Nastart.Domain/Entities/Invitation.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
-using RecipeCost.Domain.Enums;
+using Nastart.Domain.Common;
+using Nastart.Domain.Enums;
 
 public class Invitation : BaseEntity
 {
@@ -329,13 +329,13 @@ public class Invitation : BaseEntity
 
 ### TelegramLink
 
-**File:** `src/RecipeCost.Domain/Entities/TelegramLink.cs`
+**File:** `src/Nastart.Domain/Entities/TelegramLink.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
-using RecipeCost.Domain.Enums;
+using Nastart.Domain.Common;
+using Nastart.Domain.Enums;
 
 // Canonical Decision C-6: Full schema
 // C-14: Column is telegramUserId — not chatId, not TelegramChatId
@@ -363,12 +363,12 @@ public class TelegramLink : BaseEntity
 
 ### Unit
 
-**File:** `src/RecipeCost.Domain/Entities/Unit.cs`
+**File:** `src/Nastart.Domain/Entities/Unit.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 public class Unit : BaseEntity
 {
@@ -379,12 +379,12 @@ public class Unit : BaseEntity
 
 ### Category
 
-**File:** `src/RecipeCost.Domain/Entities/Category.cs`
+**File:** `src/Nastart.Domain/Entities/Category.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 public class Category : BaseEntity
 {
@@ -402,12 +402,12 @@ public class Category : BaseEntity
 
 > ⚠️ **v2-only — do not build in v1.**
 
-**File:** `src/RecipeCost.Domain/Entities/Supplier.cs`
+**File:** `src/Nastart.Domain/Entities/Supplier.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 public class Supplier : BaseEntity
 {
@@ -422,12 +422,12 @@ public class Supplier : BaseEntity
 
 ### Ingredient
 
-**File:** `src/RecipeCost.Domain/Entities/Ingredient.cs`
+**File:** `src/Nastart.Domain/Entities/Ingredient.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 // Canonical Decision C-3: There is NO current_price column.
 // Current price is ALWAYS derived from the latest IngredientPriceHistory record.
@@ -460,13 +460,13 @@ public class Ingredient : BaseEntity
 
 ### IngredientPriceHistory
 
-**File:** `src/RecipeCost.Domain/Entities/IngredientPriceHistory.cs`
+**File:** `src/Nastart.Domain/Entities/IngredientPriceHistory.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
-using RecipeCost.Domain.Enums;
+using Nastart.Domain.Common;
+using Nastart.Domain.Enums;
 
 // This is an APPEND-ONLY table. Records are NEVER updated or deleted.
 // Canonical Decision C-5: Cascade errors never roll back price history.
@@ -526,15 +526,15 @@ The `AppDbContext` is your gateway to the database. It lives in Infrastructure:
 
 > ⚠️ **v2-only — omit enterprise DbSets above.** AppDbContext registers only the 9 entities below.
 
-**File:** `src/RecipeCost.Infrastructure/Persistence/AppDbContext.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/AppDbContext.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Common;
-using RecipeCost.Domain.Entities;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Common;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Persistence;
+namespace Nastart.Infrastructure.Persistence;
 
 public class AppDbContext : DbContext, IAppDbContext
 {
@@ -582,13 +582,13 @@ Now update `IAppDbContext` to include the DbSet properties:
 
 > ⚠️ **v2-only — omit enterprise DbSets above.** AppDbContext registers only the 9 entities below.
 
-**File:** `src/RecipeCost.Application/Common/Interfaces/IAppDbContext.cs`
+**File:** `src/Nastart.Application/Common/Interfaces/IAppDbContext.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Application.Common.Interfaces;
+namespace Nastart.Application.Common.Interfaces;
 
 public interface IAppDbContext
 {
@@ -693,19 +693,19 @@ public interface IAppDbContext
 EF Core's Fluent API lets you configure columns, constraints, and indexes separately from the entity class. Create one configuration file per entity in Infrastructure:
 
 ```bash
-mkdir -p src/RecipeCost.Infrastructure/Persistence/Configurations
+mkdir -p src/Nastart.Infrastructure/Persistence/Configurations
 ```
 
 ### Key configurations (not every entity — just the ones with important constraints)
 
-**File:** `src/RecipeCost.Infrastructure/Persistence/Configurations/UserConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/UserConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Persistence.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 public class UserConfiguration : IEntityTypeConfiguration<User>
 {
@@ -721,14 +721,14 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 
 > ⚠️ **v2-only — do not build in v1.**
 
-**File:** `src/RecipeCost.Infrastructure/Persistence/Configurations/OutletUserConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/OutletUserConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Persistence.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 public class OutletUserConfiguration : IEntityTypeConfiguration<OutletUser>
 {
@@ -753,15 +753,15 @@ public class OutletUserConfiguration : IEntityTypeConfiguration<OutletUser>
 }
 ```
 
-**File:** `src/RecipeCost.Infrastructure/Persistence/Configurations/TelegramLinkConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/TelegramLinkConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
-using RecipeCost.Domain.Enums;
+using Nastart.Domain.Entities;
+using Nastart.Domain.Enums;
 
-namespace RecipeCost.Infrastructure.Persistence.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 public class TelegramLinkConfiguration : IEntityTypeConfiguration<TelegramLink>
 {
@@ -796,14 +796,14 @@ public class TelegramLinkConfiguration : IEntityTypeConfiguration<TelegramLink>
 }
 ```
 
-**File:** `src/RecipeCost.Infrastructure/Persistence/Configurations/IngredientConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/IngredientConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Persistence.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
 {
@@ -842,14 +842,14 @@ public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
 > ```
 > In v1 (single user), handlers already apply the `UserId` filter explicitly, so this is optional. Use `IgnoreQueryFilters()` on specific queries that deliberately bypass the filter (e.g. admin diagnostics).
 
-**File:** `src/RecipeCost.Infrastructure/Persistence/Configurations/IngredientPriceHistoryConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/IngredientPriceHistoryConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Persistence.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<IngredientPriceHistory>
 {
@@ -878,14 +878,14 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
 }
 ```
 
-**File:** `src/RecipeCost.Infrastructure/Persistence/Configurations/CategoryConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/CategoryConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Persistence.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 public class CategoryConfiguration : IEntityTypeConfiguration<Category>
 {
@@ -906,14 +906,14 @@ public class CategoryConfiguration : IEntityTypeConfiguration<Category>
 
 > ⚠️ **v2-only — do not build in v1.**
 
-**File:** `src/RecipeCost.Infrastructure/Persistence/Configurations/InvitationConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/InvitationConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Persistence.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 public class InvitationConfiguration : IEntityTypeConfiguration<Invitation>
 {
@@ -929,14 +929,14 @@ public class InvitationConfiguration : IEntityTypeConfiguration<Invitation>
 
 > ⚠️ **v2-only — do not build in v1.**
 
-**File:** `src/RecipeCost.Infrastructure/Persistence/Configurations/SupplierConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/SupplierConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Persistence.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 public class SupplierConfiguration : IEntityTypeConfiguration<Supplier>
 {
@@ -959,16 +959,16 @@ public class SupplierConfiguration : IEntityTypeConfiguration<Supplier>
 
 Wire EF Core into the DI container. Create a clean extension method:
 
-**File:** `src/RecipeCost.Infrastructure/DependencyInjection.cs`
+**File:** `src/Nastart.Infrastructure/DependencyInjection.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Infrastructure.Persistence;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Infrastructure.Persistence;
 
-namespace RecipeCost.Infrastructure;
+namespace Nastart.Infrastructure;
 
 public static class DependencyInjection
 {
@@ -993,10 +993,10 @@ public static class DependencyInjection
 
 Update `Program.cs` to call it:
 
-**File:** `src/RecipeCost.API/Program.cs`
+**File:** `src/Nastart.API/Program.cs`
 
 ```csharp
-using RecipeCost.Infrastructure;
+using Nastart.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -1017,14 +1017,14 @@ app.Run();
 ```bash
 # Create the initial migration
 dotnet ef migrations add CreatePhase1Schema \
-  --project src/RecipeCost.Infrastructure \
-  --startup-project src/RecipeCost.API \
+  --project src/Nastart.Infrastructure \
+  --startup-project src/Nastart.API \
   --output-dir Persistence/Migrations
 
 # Apply the migration to the database
 dotnet ef database update \
-  --project src/RecipeCost.Infrastructure \
-  --startup-project src/RecipeCost.API
+  --project src/Nastart.Infrastructure \
+  --startup-project src/Nastart.API
 ```
 
 > **What just happened:** EF Core compared your entity classes + Fluent API configuration against the current database (empty). It generated a C# migration file that creates all 11 tables with columns, primary keys, foreign keys, indexes, and constraints. Then `database update` executed the generated SQL against your PostgreSQL.
@@ -1044,10 +1044,10 @@ You should see tables for: users, telegram_links, ingredients, ingredient_price_
 
 For L5's email verification, we need an email service that logs to console instead of sending real emails:
 
-**File:** `src/RecipeCost.Application/Common/Interfaces/IEmailService.cs`
+**File:** `src/Nastart.Application/Common/Interfaces/IEmailService.cs`
 
 ```csharp
-namespace RecipeCost.Application.Common.Interfaces;
+namespace Nastart.Application.Common.Interfaces;
 
 public interface IEmailService
 {
@@ -1055,13 +1055,13 @@ public interface IEmailService
 }
 ```
 
-**File:** `src/RecipeCost.Infrastructure/Services/ConsoleEmailService.cs`
+**File:** `src/Nastart.Infrastructure/Services/ConsoleEmailService.cs`
 
 ```csharp
 using Microsoft.Extensions.Logging;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Infrastructure.Services;
+namespace Nastart.Infrastructure.Services;
 
 // Development-only email service — logs email content to console.
 // Replace with a real SMTP/SendGrid implementation for production.
@@ -1104,15 +1104,15 @@ dotnet build
 
 # 3. Migration applied without errors
 dotnet ef database update \
-  --project src/RecipeCost.Infrastructure \
-  --startup-project src/RecipeCost.API
+  --project src/Nastart.Infrastructure \
+  --startup-project src/Nastart.API
 
 # 4. Tables exist in PostgreSQL
 docker exec -it $(docker compose ps -q postgres) psql -U dev -d recipe_cost_dev -c "\dt"
 # Should show 9 tables (plus __EFMigrationsHistory)
 
 # 5. API runs
-dotnet run --project src/RecipeCost.API
+dotnet run --project src/Nastart.API
 # curl http://localhost:5000/health → {"status":"healthy"}
 ```
 

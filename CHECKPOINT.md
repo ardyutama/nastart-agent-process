@@ -108,9 +108,9 @@ Role stripping is **server-side only**. Vue.js never receives `food_cost_pct` or
 ```
 nastart/
 ├── backend/                    ← .NET 10
-│   ├── RecipeCost.API/
-│   ├── RecipeCost.Core/
-│   └── RecipeCost.Infrastructure/
+│   ├── Nastart.API/
+│   ├── Nastart.Application/
+│   └── Nastart.Infrastructure/
 ├── ai-service/                 ← Python FastAPI
 │   ├── ocr/
 │   ├── llm/
@@ -304,7 +304,7 @@ These were raised during persona and planning sessions. Not in scope for the 5-p
 
 **Next action: Start Phase 1 — Foundation (solopreneur scope)**
 - Design PostgreSQL schema for: `User`, `Ingredient`, `IngredientPriceHistory`, `Unit`, `Category`, `Recipe`, `RecipeItem` (no Company, no Outlet, no Invitation, no OutletUser in v1)
-- Scaffold .NET 10 solution: `RecipeCost.API`, `RecipeCost.Core`, `RecipeCost.Infrastructure`
+- Scaffold .NET 10 solution: `Nastart.API`, `Nastart.Application`, `Nastart.Infrastructure`
 - Set up Vue.js (Vite + TypeScript) frontend scaffold
 - Build: JWT auth (single user, no roles), ingredient CRUD, login screen, ingredient management page
 

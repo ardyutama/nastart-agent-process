@@ -95,7 +95,7 @@ A JWT contains **claims** — key-value pairs about the user:
 > ⚠️ **v2-only — do not build the Role enum in v1.** Single-user design has no roles. See amendment block above.
 
 ```csharp
-namespace RecipeCost.Domain.Enums;
+namespace Nastart.Domain.Enums;
 
 // Canonical Decision C-8: Exactly 4 roles — no Admin, no Manager, no Superuser
 public enum Role
@@ -115,10 +115,10 @@ public enum Role
 
 ```bash
 # API project needs JWT auth
-dotnet add src/RecipeCost.API package Microsoft.AspNetCore.Authentication.JwtBearer
+dotnet add src/Nastart.API package Microsoft.AspNetCore.Authentication.JwtBearer
 
 # Infrastructure needs password hashing
-dotnet add src/RecipeCost.Infrastructure package BCrypt.Net-Next
+dotnet add src/Nastart.Infrastructure package BCrypt.Net-Next
 ```
 
 ---
@@ -127,7 +127,7 @@ dotnet add src/RecipeCost.Infrastructure package BCrypt.Net-Next
 
 Add JWT settings to `appsettings.json`:
 
-**File:** `src/RecipeCost.API/appsettings.json`
+**File:** `src/Nastart.API/appsettings.json`
 
 ```json
 {
@@ -135,8 +135,8 @@ Add JWT settings to `appsettings.json`:
     "DefaultConnection": "Host=localhost;Port=5432;Database=recipe_cost_dev;Username=dev;Password=dev_password"
   },
   "Jwt": {
-    "Issuer": "RecipeCost.API",
-    "Audience": "RecipeCost.Client"
+    "Issuer": "Nastart.API",
+    "Audience": "Nastart.Client"
     // SecretKey is NOT stored here — it is loaded from user-secrets (dev) or environment variable (prod)
     // See setup instructions below
   },
@@ -154,7 +154,7 @@ Add JWT settings to `appsettings.json`:
 > **Development — use .NET User Secrets:**
 > ```bash
 > # Run from the API project folder
-> cd src/RecipeCost.API
+> cd src/Nastart.API
 > dotnet user-secrets init
 > dotnet user-secrets set "Jwt:SecretKey" "your-dev-secret-min-32-chars-long-here"
 > ```
@@ -174,16 +174,16 @@ Add JWT settings to `appsettings.json`:
 ## 4. Register Slice — User Sign-Up
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Auth/Commands/Register
+mkdir -p src/Nastart.Application/Features/Auth/Commands/Register
 ```
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/Register/RegisterCommand.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/Register/RegisterCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Auth.Commands.Register;
+namespace Nastart.Application.Features.Auth.Commands.Register;
 
 public record RegisterCommand(
     string Name,
@@ -192,20 +192,20 @@ public record RegisterCommand(
 ) : IRequest<ErrorOr<RegisterResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/Register/RegisterResponse.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/Register/RegisterResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Auth.Commands.Register;
+namespace Nastart.Application.Features.Auth.Commands.Register;
 
 public record RegisterResponse(Guid UserId, string Message);
 ```
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/Register/RegisterCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/Register/RegisterCommandValidator.cs`
 
 ```csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Auth.Commands.Register;
+namespace Nastart.Application.Features.Auth.Commands.Register;
 
 public class RegisterCommandValidator : AbstractValidator<RegisterCommand>
 {
@@ -228,10 +228,10 @@ public class RegisterCommandValidator : AbstractValidator<RegisterCommand>
 
 Define in Application (interface), implement in Infrastructure:
 
-**File:** `src/RecipeCost.Application/Common/Interfaces/IPasswordHasher.cs`
+**File:** `src/Nastart.Application/Common/Interfaces/IPasswordHasher.cs`
 
 ```csharp
-namespace RecipeCost.Application.Common.Interfaces;
+namespace Nastart.Application.Common.Interfaces;
 
 public interface IPasswordHasher
 {
@@ -240,12 +240,12 @@ public interface IPasswordHasher
 }
 ```
 
-**File:** `src/RecipeCost.Infrastructure/Services/BcryptPasswordHasher.cs`
+**File:** `src/Nastart.Infrastructure/Services/BcryptPasswordHasher.cs`
 
 ```csharp
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Infrastructure.Services;
+namespace Nastart.Infrastructure.Services;
 
 public class BcryptPasswordHasher : IPasswordHasher
 {
@@ -269,17 +269,17 @@ services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 
 ### Register Handler
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/Register/RegisterHandler.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/Register/RegisterHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Application.Features.Auth.Commands.Register;
+namespace Nastart.Application.Features.Auth.Commands.Register;
 
 public class RegisterHandler : IRequestHandler<RegisterCommand, ErrorOr<RegisterResponse>>
 {
@@ -328,7 +328,7 @@ public class RegisterHandler : IRequestHandler<RegisterCommand, ErrorOr<Register
         // For Phase 1, we directly log it for manual testing
         await _email.SendAsync(
             user.Email,
-            "Verify your RecipeCost account",
+            "Verify your Nastart account",
             $"Click here to verify: /api/auth/verify?token={verificationToken}&userId={user.Id}");
 
         return new RegisterResponse(user.Id, "Check your email to verify your account.");
@@ -341,15 +341,15 @@ public class RegisterHandler : IRequestHandler<RegisterCommand, ErrorOr<Register
 ## 5. Login Slice — Issue JWT
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Auth/Commands/Login
+mkdir -p src/Nastart.Application/Features/Auth/Commands/Login
 ```
 
 ### Token Generation Interface
 
-**File:** `src/RecipeCost.Application/Common/Interfaces/ITokenService.cs`
+**File:** `src/Nastart.Application/Common/Interfaces/ITokenService.cs`
 
 ```csharp
-namespace RecipeCost.Application.Common.Interfaces;
+namespace Nastart.Application.Common.Interfaces;
 
 public interface ITokenService
 {
@@ -357,7 +357,7 @@ public interface ITokenService
 }
 ```
 
-**File:** `src/RecipeCost.Infrastructure/Services/JwtTokenService.cs`
+**File:** `src/Nastart.Infrastructure/Services/JwtTokenService.cs`
 
 ```csharp
 using System.IdentityModel.Tokens.Jwt;
@@ -365,9 +365,9 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Infrastructure.Services;
+namespace Nastart.Infrastructure.Services;
 
 public class JwtTokenService : ITokenService
 {
@@ -416,32 +416,32 @@ services.AddScoped<ITokenService, JwtTokenService>();
 
 ### Login Command
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/Login/LoginCommand.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/Login/LoginCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Auth.Commands.Login;
+namespace Nastart.Application.Features.Auth.Commands.Login;
 
 public record LoginCommand(string Email, string Password) : IRequest<ErrorOr<LoginResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/Login/LoginResponse.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/Login/LoginResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Auth.Commands.Login;
+namespace Nastart.Application.Features.Auth.Commands.Login;
 
 // v1: single user — token only, no outlet or role returned
 public record LoginResponse(string Token);
 ```
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/Login/LoginCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/Login/LoginCommandValidator.cs`
 
 ```csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Auth.Commands.Login;
+namespace Nastart.Application.Features.Auth.Commands.Login;
 
 public class LoginCommandValidator : AbstractValidator<LoginCommand>
 {
@@ -453,15 +453,15 @@ public class LoginCommandValidator : AbstractValidator<LoginCommand>
 }
 ```
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/Login/LoginHandler.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/Login/LoginHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Auth.Commands.Login;
+namespace Nastart.Application.Features.Auth.Commands.Login;
 
 public class LoginHandler : IRequestHandler<LoginCommand, ErrorOr<LoginResponse>>
 {
@@ -510,15 +510,15 @@ public class LoginHandler : IRequestHandler<LoginCommand, ErrorOr<LoginResponse>
 
 ## 6. Auth Endpoints
 
-**File:** `src/RecipeCost.API/Endpoints/AuthEndpoints.cs`
+**File:** `src/Nastart.API/Endpoints/AuthEndpoints.cs`
 
 ```csharp
 using MediatR;
-using RecipeCost.API.Extensions;
-using RecipeCost.Application.Features.Auth.Commands.Login;
-using RecipeCost.Application.Features.Auth.Commands.Register;
+using Nastart.API.Extensions;
+using Nastart.Application.Features.Auth.Commands.Login;
+using Nastart.Application.Features.Auth.Commands.Register;
 
-namespace RecipeCost.API.Endpoints;
+namespace Nastart.API.Endpoints;
 
 public static class AuthEndpoints
 {
@@ -547,16 +547,16 @@ public static class AuthEndpoints
 
 ## 7. Wire JWT Authentication in Program.cs
 
-**File:** `src/RecipeCost.API/Program.cs`
+**File:** `src/Nastart.API/Program.cs`
 
 ```csharp
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
-using RecipeCost.Application;
-using RecipeCost.Infrastructure;
-using RecipeCost.API.Endpoints;
-using RecipeCost.API.Middleware;
+using Nastart.Application;
+using Nastart.Infrastructure;
+using Nastart.API.Endpoints;
+using Nastart.API.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -612,12 +612,12 @@ app.Run();
 
 Update existing endpoints to require authentication. Also add the helper to extract claims from the JWT:
 
-**File:** `src/RecipeCost.API/Extensions/ClaimsPrincipalExtensions.cs`
+**File:** `src/Nastart.API/Extensions/ClaimsPrincipalExtensions.cs`
 
 ```csharp
 using System.Security.Claims;
 
-namespace RecipeCost.API.Extensions;
+namespace Nastart.API.Extensions;
 
 public static class ClaimsPrincipalExtensions
 {
@@ -641,16 +641,16 @@ public static class ClaimsPrincipalExtensions
 
 > ⚠️ **v2-only — do not build in v1.** The `OutletEndpoints.cs` code below is for reference only in Phase 2+. Outlets do not exist in the single-user v1 design. Do not create this file in v1.
 
-**File:** `src/RecipeCost.API/Endpoints/OutletEndpoints.cs` (v2-only)
+**File:** `src/Nastart.API/Endpoints/OutletEndpoints.cs` (v2-only)
 
 ```csharp
 using System.Security.Claims;
 using MediatR;
-using RecipeCost.API.Extensions;
-using RecipeCost.Application.Features.Outlets.Commands.CreateOutlet;
-using RecipeCost.Application.Features.Outlets.Queries.GetOutlets;
+using Nastart.API.Extensions;
+using Nastart.Application.Features.Outlets.Commands.CreateOutlet;
+using Nastart.Application.Features.Outlets.Queries.GetOutlets;
 
-namespace RecipeCost.API.Endpoints;
+namespace Nastart.API.Endpoints;
 
 public static class OutletEndpoints
 {
@@ -724,15 +724,15 @@ This is critical: **non-Owner roles must NEVER receive `food_cost_pct` or `gross
 
 The pattern: create separate response DTOs per role visibility level.
 
-**File:** `src/RecipeCost.Application/Common/RoleVisibility/RecipeCostResponse.cs`
+**File:** `src/Nastart.Application/Common/RoleVisibility/NastartResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Common.RoleVisibility;
+namespace Nastart.Application.Common.RoleVisibility;
 
 // C-10: Role-masked responses — absent fields are NOT present in JSON
 
 // Owner sees everything
-public record RecipeCostOwnerResponse(
+public record NastartOwnerResponse(
     Guid RecipeId,
     string RecipeName,
     decimal CostPerPortion,
@@ -741,7 +741,7 @@ public record RecipeCostOwnerResponse(
     int PortionCount);
 
 // Chef, Procurement, Viewer — financial metrics stripped
-public record RecipeCostStandardResponse(
+public record NastartStandardResponse(
     Guid RecipeId,
     string RecipeName,
     decimal CostPerPortion,
@@ -762,13 +762,13 @@ public async Task<ErrorOr<object>> Handle(GetRecipeQuery query, CancellationToke
     // query.Role comes from the JWT claims, passed through the endpoint
     if (query.Role == "Owner")
     {
-        return new RecipeCostOwnerResponse(
+        return new NastartOwnerResponse(
             recipe.Id, recipe.Name, recipe.CostPerPortion,
             recipe.FoodCostPct, recipe.GrossMargin, recipe.PortionCount);
     }
 
     // Non-owner: food_cost_pct and gross_margin fields do not exist in this DTO
-    return new RecipeCostStandardResponse(
+    return new NastartStandardResponse(
         recipe.Id, recipe.Name, recipe.CostPerPortion, recipe.PortionCount);
 }
 ```
@@ -782,37 +782,37 @@ public async Task<ErrorOr<object>> Handle(GetRecipeQuery query, CancellationToke
 Full email verification with token storage is a future improvement. For Phase 1, a simple verify endpoint that activates the user:
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Auth/Commands/VerifyEmail
+mkdir -p src/Nastart.Application/Features/Auth/Commands/VerifyEmail
 ```
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/VerifyEmail/VerifyEmailCommand.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/VerifyEmail/VerifyEmailCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Auth.Commands.VerifyEmail;
+namespace Nastart.Application.Features.Auth.Commands.VerifyEmail;
 
 public record VerifyEmailCommand(Guid UserId) : IRequest<ErrorOr<VerifyEmailResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/VerifyEmail/VerifyEmailResponse.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/VerifyEmail/VerifyEmailResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Auth.Commands.VerifyEmail;
+namespace Nastart.Application.Features.Auth.Commands.VerifyEmail;
 
 public record VerifyEmailResponse(string Message);
 ```
 
-**File:** `src/RecipeCost.Application/Features/Auth/Commands/VerifyEmail/VerifyEmailHandler.cs`
+**File:** `src/Nastart.Application/Features/Auth/Commands/VerifyEmail/VerifyEmailHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Auth.Commands.VerifyEmail;
+namespace Nastart.Application.Features.Auth.Commands.VerifyEmail;
 
 public class VerifyEmailHandler : IRequestHandler<VerifyEmailCommand, ErrorOr<VerifyEmailResponse>>
 {
@@ -866,16 +866,16 @@ group.MapPost("/verify", async (VerifyEmailCommand command, ISender sender, Canc
 After a new user's first login, they have no outlet yet. They need to create a Company and first Outlet. Build the Company creation slice:
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Companies/Commands/CreateCompany
+mkdir -p src/Nastart.Application/Features/Companies/Commands/CreateCompany
 ```
 
-**File:** `src/RecipeCost.Application/Features/Companies/Commands/CreateCompany/CreateCompanyCommand.cs`
+**File:** `src/Nastart.Application/Features/Companies/Commands/CreateCompany/CreateCompanyCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Companies.Commands.CreateCompany;
+namespace Nastart.Application.Features.Companies.Commands.CreateCompany;
 
 public record CreateCompanyCommand(
     Guid UserId,
@@ -885,24 +885,24 @@ public record CreateCompanyCommand(
 ) : IRequest<ErrorOr<CreateCompanyResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Companies/Commands/CreateCompany/CreateCompanyResponse.cs`
+**File:** `src/Nastart.Application/Features/Companies/Commands/CreateCompany/CreateCompanyResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Companies.Commands.CreateCompany;
+namespace Nastart.Application.Features.Companies.Commands.CreateCompany;
 
 public record CreateCompanyResponse(Guid CompanyId, Guid OutletId, string Token);
 ```
 
-**File:** `src/RecipeCost.Application/Features/Companies/Commands/CreateCompany/CreateCompanyHandler.cs`
+**File:** `src/Nastart.Application/Features/Companies/Commands/CreateCompany/CreateCompanyHandler.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
-using RecipeCost.Domain.Enums;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
+using Nastart.Domain.Enums;
 
-namespace RecipeCost.Application.Features.Companies.Commands.CreateCompany;
+namespace Nastart.Application.Features.Companies.Commands.CreateCompany;
 
 public class CreateCompanyHandler
     : IRequestHandler<CreateCompanyCommand, ErrorOr<CreateCompanyResponse>>
@@ -980,7 +980,7 @@ group.MapPost("/setup", async (CreateCompanyRequest request, ClaimsPrincipal use
 Test the complete flow. The API should be running with all endpoints wired:
 
 ```bash
-dotnet run --project src/RecipeCost.API
+dotnet run --project src/Nastart.API
 ```
 
 ```bash

@@ -403,7 +403,7 @@ Both triggers fire from within the .NET 10 API **after** it processes a price up
 | **Action** | Following an `IngredientPriceHistory` insert (triggered by the invoice scan webhook from Python FastAPI), calls `ICostCascadeService.RecalculateForIngredient(ingredientId)`. This recalculates `cost_per_portion` and `food_cost_pct` for every active `Recipe` in the affected `Outlet` that references the updated `Ingredient` via `RecipeItem`. Current price is sourced from `SELECT price FROM IngredientPriceHistory WHERE ingredient_id = @id ORDER BY committed_at DESC LIMIT 1`. Formula applied per recipe item: `item_cost = (unit_price / unit_size) * quantity * (1 / yield_pct)`. `cost_per_portion = SUM(item_costs) / Recipe.portion_count`. Updated values are stored. |
 | **Component** | .NET 10 API → PostgreSQL |
 | **Data IN** | `ingredientId` from the `IngredientPriceHistory` insert event |
-| **Data OUT** | `RecipeCostSnapshot[] { recipe_id, recipe_name, outlet_id, old_cost_per_portion, new_cost_per_portion, old_food_cost_pct, new_food_cost_pct, sell_price, old_gross_margin, new_gross_margin, cost_threshold_percentage }` |
+| **Data OUT** | `NastartSnapshot[] { recipe_id, recipe_name, outlet_id, old_cost_per_portion, new_cost_per_portion, old_food_cost_pct, new_food_cost_pct, sell_price, old_gross_margin, new_gross_margin, cost_threshold_percentage }` |
 | **Decision point** | No — recalculation runs for all affected recipes unconditionally |
 | **Error case** | Recalculation failure for a specific `Recipe` → log error for that recipe; continue processing remaining recipes; **per-recipe errors never roll back the `IngredientPriceHistory` insert** |
 
@@ -415,7 +415,7 @@ Both triggers fire from within the .NET 10 API **after** it processes a price up
 | **Actor** | .NET 10 API (Alert Evaluation engine) |
 | **Action** | For each recipe in the snapshot: evaluates Trigger A using `Recipe.cost_threshold_percentage`. For the updated ingredient itself: evaluates Trigger B. Records each qualifying breach as an `AlertEvent`. |
 | **Component** | .NET 10 API → PostgreSQL (reads `Recipe.cost_threshold_percentage` per recipe, `Ingredient.price_spike_threshold_pct`) |
-| **Data IN** | `RecipeCostSnapshot[]` (each includes `cost_threshold_percentage`), `IngredientPriceHistory` (new + old price), `Ingredient.price_spike_threshold_pct` |
+| **Data IN** | `NastartSnapshot[]` (each includes `cost_threshold_percentage`), `IngredientPriceHistory` (new + old price), `Ingredient.price_spike_threshold_pct` |
 | **Data OUT** | `AlertEvent[] { alert_type: "food_cost_threshold" \| "price_spike", outlet_id, recipe_id?, recipe_name?, ingredient_id, ingredient_name, supplier_id, supplier_name, old_value, new_value, threshold, invoice_id }` |
 | **Decision point** | YES — Trigger A: `new_food_cost_pct > recipe.cost_threshold_percentage` AND `old_food_cost_pct ≤ recipe.cost_threshold_percentage` (alert only on the crossing event, not on every subsequent recalculation). Trigger B: `\|new_price − old_price\| / old_price > Ingredient.price_spike_threshold_pct`. If neither condition is met for any recipe or ingredient → exit flow (no alert generated). |
 | **Error case** | Missing `Ingredient.price_spike_threshold_pct` → use system default (10%); log warning. `Recipe.cost_threshold_percentage` is a required non-null field; if missing for a recipe → skip Trigger A for that recipe and log warning. |

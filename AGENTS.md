@@ -36,10 +36,10 @@ When a receipt is scanned, ingredient costs cascade automatically through all af
 ```
 nastart/
 ├── backend/
-│   ├── RecipeCost.API/           ← Program.cs, endpoints, middleware
-│   ├── RecipeCost.Application/   ← MediatR handlers, commands, queries, DTOs
-│   ├── RecipeCost.Domain/        ← Entities, interfaces, enums
-│   └── RecipeCost.Infrastructure/← EF Core, repositories, external services
+│   ├── Nastart.API/           ← Program.cs, endpoints, middleware
+│   ├── Nastart.Application/   ← MediatR handlers, commands, queries, DTOs
+│   ├── Nastart.Domain/        ← Entities, interfaces, enums
+│   └── Nastart.Infrastructure/← EF Core, repositories, external services
 ├── ai-service/                   ← Python FastAPI: OCR, LLM, Telegram
 ├── frontend/                     ← Vue.js 3 + Vite + TypeScript
 └── docker-compose.yml
@@ -53,11 +53,11 @@ nastart/
 # .NET backend
 dotnet build
 dotnet test
-dotnet run --project src/RecipeCost.API
+dotnet run --project src/Nastart.API
 
 # EF Core migrations
-dotnet ef migrations add <Name> --project src/RecipeCost.Infrastructure --startup-project src/RecipeCost.API
-dotnet ef database update --project src/RecipeCost.Infrastructure --startup-project src/RecipeCost.API
+dotnet ef migrations add <Name> --project src/Nastart.Infrastructure --startup-project src/Nastart.API
+dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.API
 
 # Python AI service
 pip install -r requirements.txt

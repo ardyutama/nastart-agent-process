@@ -54,12 +54,12 @@ This keeps business logic portable and testable, separate from infrastructure co
 
 A recipe belongs to ONE user (single-user v1; no outlet scoping). The `CostPerPortion` is **server-authoritative** — updated ONLY by `CostCascadeService`. Each recipe can have multiple versions grouped by `VersionGroupId`.
 
-**File:** `src/RecipeCost.Domain/Entities/Recipe.cs`
+**File:** `src/Nastart.Domain/Entities/Recipe.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 // C-9: CostThresholdPercentage is per-Recipe, not per-Outlet
 public class Recipe : BaseEntity
@@ -98,12 +98,12 @@ public class Recipe : BaseEntity
 
 Each `RecipeItem` is one ingredient line in a recipe. The `YieldPercentage` represents usable yield (e.g., 0.85 = 85% usable, 15% waste). The cost formula uses this to adjust final cost.
 
-**File:** `src/RecipeCost.Domain/Entities/RecipeItem.cs`
+**File:** `src/Nastart.Domain/Entities/RecipeItem.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 // C-2 formula per item:
 // item_cost = (price / unitSize) * quantity * (1 / yieldPercentage)
@@ -127,12 +127,12 @@ public class RecipeItem : BaseEntity
 
 Per-recipe cascade failures are logged here. `IngredientPriceHistory` is NEVER rolled back when cascade fails — the error is recorded separately and processing continues.
 
-**File:** `src/RecipeCost.Domain/Entities/CascadeErrorLog.cs`
+**File:** `src/Nastart.Domain/Entities/CascadeErrorLog.cs`
 
 ```csharp
-namespace RecipeCost.Domain.Entities;
+namespace Nastart.Domain.Entities;
 
-using RecipeCost.Domain.Common;
+using Nastart.Domain.Common;
 
 // C-5: Per-recipe cascade failures are logged here and skipped.
 // IngredientPriceHistory is append-only and NEVER rolled back on cascade failure.
@@ -149,7 +149,7 @@ public class CascadeErrorLog : BaseEntity
 
 ## 3. Extend IAppDbContext
 
-Add these DbSet properties to `src/RecipeCost.Application/Common/Interfaces/IAppDbContext.cs`:
+Add these DbSet properties to `src/Nastart.Application/Common/Interfaces/IAppDbContext.cs`:
 
 ```csharp
 DbSet<Recipe> Recipes { get; }
@@ -161,7 +161,7 @@ DbSet<CascadeErrorLog> CascadeErrorLogs { get; }
 
 ## 4. Extend AppDbContext
 
-Add these properties to `src/RecipeCost.Infrastructure/Data/AppDbContext.cs`:
+Add these properties to `src/Nastart.Infrastructure/Data/AppDbContext.cs`:
 
 ```csharp
 public DbSet<Recipe> Recipes => Set<Recipe>();
@@ -173,18 +173,18 @@ public DbSet<CascadeErrorLog> CascadeErrorLogs => Set<CascadeErrorLog>();
 
 ## 5. EF Core Entity Configurations
 
-Create these configuration files in `src/RecipeCost.Infrastructure/Data/Configurations/`.
+Create these configuration files in `src/Nastart.Infrastructure/Data/Configurations/`.
 
 ### RecipeConfiguration
 
-**File:** `src/RecipeCost.Infrastructure/Data/Configurations/RecipeConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Data/Configurations/RecipeConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Data.Configurations;
+namespace Nastart.Infrastructure.Data.Configurations;
 
 public class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
 {
@@ -225,14 +225,14 @@ public class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
 
 ### RecipeItemConfiguration
 
-**File:** `src/RecipeCost.Infrastructure/Data/Configurations/RecipeItemConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Data/Configurations/RecipeItemConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Data.Configurations;
+namespace Nastart.Infrastructure.Data.Configurations;
 
 public class RecipeItemConfiguration : IEntityTypeConfiguration<RecipeItem>
 {
@@ -258,14 +258,14 @@ public class RecipeItemConfiguration : IEntityTypeConfiguration<RecipeItem>
 
 ### CascadeErrorLogConfiguration
 
-**File:** `src/RecipeCost.Infrastructure/Data/Configurations/CascadeErrorLogConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Data/Configurations/CascadeErrorLogConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using RecipeCost.Domain.Entities;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Infrastructure.Data.Configurations;
+namespace Nastart.Infrastructure.Data.Configurations;
 
 public class CascadeErrorLogConfiguration : IEntityTypeConfiguration<CascadeErrorLog>
 {
@@ -291,22 +291,22 @@ Run these commands to create and apply the migration:
 
 ```bash
 dotnet ef migrations add AddPhase2RecipeEntities \
-  --project src/RecipeCost.Infrastructure \
-  --startup-project src/RecipeCost.API
+  --project src/Nastart.Infrastructure \
+  --startup-project src/Nastart.API
 
 dotnet ef database update \
-  --project src/RecipeCost.Infrastructure \
-  --startup-project src/RecipeCost.API
+  --project src/Nastart.Infrastructure \
+  --startup-project src/Nastart.API
 ```
 
 ---
 
 ## 7. ICostCascadeService Interface
 
-**File:** `src/RecipeCost.Application/Common/Interfaces/ICostCascadeService.cs`
+**File:** `src/Nastart.Application/Common/Interfaces/ICostCascadeService.cs`
 
 ```csharp
-namespace RecipeCost.Application.Common.Interfaces;
+namespace Nastart.Application.Common.Interfaces;
 
 // C-1: Single entry point for all cost recalculations.
 // Called by: AddIngredientPrice (manual), InvoiceScanCommit (Phase 3), CreateRecipe (L8).
@@ -328,17 +328,17 @@ public record CascadeResult(int AffectedRecipes, int FailedRecipes);
 
 ## 8. CostCascadeService Implementation
 
-**File:** `src/RecipeCost.Application/Services/CostCascadeService.cs`
+**File:** `src/Nastart.Application/Services/CostCascadeService.cs`
 
 This is the heart of the cost engine. Read the inline comments carefully — each one ties back to canonical decisions.
 
 ```csharp
 using Microsoft.Extensions.Logging;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace RecipeCost.Application.Services;
+namespace Nastart.Application.Services;
 
 public class CostCascadeService : ICostCascadeService
 {
@@ -398,7 +398,7 @@ public class CostCascadeService : ICostCascadeService
         {
             try
             {
-                await RecalculateRecipeCostAsync(recipeId, cancellationToken);
+                await RecalculateNastartAsync(recipeId, cancellationToken);
                 successCount++;
             }
             catch (Exception ex)
@@ -433,7 +433,7 @@ public class CostCascadeService : ICostCascadeService
         return new CascadeResult(successCount, failCount);
     }
 
-    private async Task RecalculateRecipeCostAsync(Guid recipeId, CancellationToken cancellationToken)
+    private async Task RecalculateNastartAsync(Guid recipeId, CancellationToken cancellationToken)
     {
         // Load the recipe with all its RecipeItems and each item's Ingredient (for unit conversion)
         var recipe = await _db.Recipes
@@ -516,13 +516,13 @@ public class CostCascadeService : ICostCascadeService
 
 A static helper that compares new price to previous price and calculates % change.
 
-**File:** `src/RecipeCost.Application/Services/PriceSpikeChecker.cs`
+**File:** `src/Nastart.Application/Services/PriceSpikeChecker.cs`
 
 ```csharp
 using Microsoft.Extensions.Logging;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Services;
+namespace Nastart.Application.Services;
 
 // Helper for detecting and alerting on ingredient price spikes
 public static class PriceSpikeChecker
@@ -596,10 +596,10 @@ public static class PriceSpikeChecker
 
 ## 10. IAlertDispatcher Interface
 
-**File:** `src/RecipeCost.Application/Common/Interfaces/IAlertDispatcher.cs`
+**File:** `src/Nastart.Application/Common/Interfaces/IAlertDispatcher.cs`
 
 ```csharp
-namespace RecipeCost.Application.Common.Interfaces;
+namespace Nastart.Application.Common.Interfaces;
 
 // Interface for dispatching alerts to recipients via Python FastAPI alert service
 // In Phase 2, we use a console stub. In Phase 4 (L15), replaced with HTTP implementation.
@@ -622,13 +622,13 @@ public interface IAlertDispatcher
 
 ## 11. ConsoleAlertDispatcher Stub
 
-**File:** `src/RecipeCost.Infrastructure/Services/ConsoleAlertDispatcher.cs`
+**File:** `src/Nastart.Infrastructure/Services/ConsoleAlertDispatcher.cs`
 
 ```csharp
 using Microsoft.Extensions.Logging;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Infrastructure.Services;
+namespace Nastart.Infrastructure.Services;
 
 // Phase 2 stub implementation — logs alerts to console instead of sending to Python FastAPI.
 // In Phase 4 (L15), this is replaced with HttpAlertDispatcher that POSTs to the Python alert service.
@@ -672,13 +672,13 @@ public class ConsoleAlertDispatcher : IAlertDispatcher
 
 Now we wire the cascade and spike check into the handler that commits a new ingredient price. This replaces the L6 handler that had the TODO comment.
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommand.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommand.cs`
 
 ```csharp
 using ErrorOr;
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.AddIngredientPrice;
+namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
 public record AddIngredientPriceCommand(
     Guid IngredientId,
@@ -688,10 +688,10 @@ public record AddIngredientPriceCommand(
 ) : IRequest<ErrorOr<AddIngredientPriceResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Ingredients.Commands.AddIngredientPrice;
+namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
 public record AddIngredientPriceResponse(
     Guid IngredientPriceHistoryId,
@@ -700,12 +700,12 @@ public record AddIngredientPriceResponse(
     int FailedRecipes);
 ```
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommandValidator.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommandValidator.cs`
 
 ```csharp
 using FluentValidation;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.AddIngredientPrice;
+namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
 public class AddIngredientPriceCommandValidator : AbstractValidator<AddIngredientPriceCommand>
 {
@@ -725,7 +725,7 @@ public class AddIngredientPriceCommandValidator : AbstractValidator<AddIngredien
 }
 ```
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceHandler.cs`
 
 This is the handler that was waiting for L7. It now:
 1. Verifies ingredient exists
@@ -737,12 +737,12 @@ This is the handler that was waiting for L7. It now:
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Application.Services;
-using RecipeCost.Domain.Entities;
-using RecipeCost.Domain.Enums;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Application.Services;
+using Nastart.Domain.Entities;
+using Nastart.Domain.Enums;
 
-namespace RecipeCost.Application.Features.Ingredients.Commands.AddIngredientPrice;
+namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
 public class AddIngredientPriceHandler
     : IRequestHandler<AddIngredientPriceCommand, ErrorOr<AddIngredientPriceResponse>>
@@ -837,7 +837,7 @@ public class AddIngredientPriceHandler
 
 ### Update Application Layer DI
 
-Add to `src/RecipeCost.Application/DependencyInjection.cs`:
+Add to `src/Nastart.Application/DependencyInjection.cs`:
 
 ```csharp
 // Register CostCascadeService in Application layer
@@ -847,7 +847,7 @@ services.AddScoped<ICostCascadeService, CostCascadeService>();
 
 ### Update Infrastructure Layer DI
 
-Add to `src/RecipeCost.Infrastructure/DependencyInjection.cs`:
+Add to `src/Nastart.Infrastructure/DependencyInjection.cs`:
 
 ```csharp
 // Register alert dispatcher stub (Phase 2)
@@ -962,7 +962,7 @@ public static IServiceCollection AddInfrastructure(this IServiceCollection servi
 ### Project Setup
 
 ```xml
-<!-- tests/RecipeCost.Application.Tests/RecipeCost.Application.Tests.csproj -->
+<!-- tests/Nastart.Application.Tests/Nastart.Application.Tests.csproj -->
 <Project Sdk="MSTest.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -976,18 +976,18 @@ public static IServiceCollection AddInfrastructure(this IServiceCollection servi
 
 ### Key Test Cases
 
-**File:** `tests/RecipeCost.Application.Tests/Services/CostCascadeServiceTests.cs`
+**File:** `tests/Nastart.Application.Tests/Services/CostCascadeServiceTests.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Application.Services;
-using RecipeCost.Domain.Entities;
-using RecipeCost.Infrastructure.Data;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Application.Services;
+using Nastart.Domain.Entities;
+using Nastart.Infrastructure.Data;
 
-namespace RecipeCost.Application.Tests.Services;
+namespace Nastart.Application.Tests.Services;
 
 [TestClass]
 public sealed class CostCascadeServiceTests
@@ -1120,12 +1120,12 @@ In L8, you'll add the CreateRecipe handler which also calls `ICostCascadeService
 ---
 ```
 
-Now save this complete content to `/Users/ardyputrautama/Downloads/personas/lessons/L7-cost-cascade-service-and-price-spike-alerts.md`. 
+Now save this complete content to `lessons/L7-cost-cascade-service-and-price-spike-alerts.md` inside your project folder.
 
 You can copy the markdown above and create the file, or use this terminal command:
 
 ```bash
-cat > /Users/ardyputrautama/Downloads/personas/lessons/L7-cost-cascade-service-and-price-spike-alerts.md << 'EOF'
+cat > lessons/L7-cost-cascade-service-and-price-spike-alerts.md << 'EOF'
 [paste the entire markdown content above]
 EOF
 ```

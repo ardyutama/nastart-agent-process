@@ -431,7 +431,7 @@
 | Field | Value |
 |---|---|
 | **Actor** | Vue.js |
-| **Action** | Displays the 6-character link code prominently with a 15-minute countdown timer. Shows instruction: "Open Telegram, find our bot @RecipeCostBot, and send: `/link A3FKW2`". |
+| **Action** | Displays the 6-character link code prominently with a 15-minute countdown timer. Shows instruction: "Open Telegram, find our bot @NastartBot, and send: `/link A3FKW2`". |
 | **Component** | Vue.js |
 | **Data IN** | `code` from Step 2 response |
 | **Data OUT** | Code displayed to user. Timer begins. |
@@ -445,7 +445,7 @@
 | Field | Value |
 |---|---|
 | **Actor** | User |
-| **Action** | Opens Telegram, navigates to `@RecipeCostBot`, and sends the message `/link A3FKW2`. |
+| **Action** | Opens Telegram, navigates to `@NastartBot`, and sends the message `/link A3FKW2`. |
 | **Component** | Telegram (external) → Telegram Bot (Python FastAPI) |
 | **Data IN** | Telegram Update object: `message.text = "/link A3FKW2"`, `message.from.id` (Telegram user ID), `message.from.username` |
 | **Data OUT** | Telegram Bot receives the update via webhook. |

@@ -58,18 +58,18 @@ Three MediatR types you'll use:
 ## 3. Install MediatR
 
 ```bash
-dotnet add src/RecipeCost.Application package MediatR
-dotnet add src/RecipeCost.API package MediatR
+dotnet add src/Nastart.Application package MediatR
+dotnet add src/Nastart.API package MediatR
 ```
 
 Register MediatR in DI. Create a DI extension for the Application layer:
 
-**File:** `src/RecipeCost.Application/DependencyInjection.cs`
+**File:** `src/Nastart.Application/DependencyInjection.cs`
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
 
-namespace RecipeCost.Application;
+namespace Nastart.Application;
 
 public static class DependencyInjection
 {
@@ -86,11 +86,11 @@ public static class DependencyInjection
 
 Update `Program.cs`:
 
-**File:** `src/RecipeCost.API/Program.cs`
+**File:** `src/Nastart.API/Program.cs`
 
 ```csharp
-using RecipeCost.Application;
-using RecipeCost.Infrastructure;
+using Nastart.Application;
+using Nastart.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -144,17 +144,17 @@ Let's build a complete query slice. This returns all outlets for a company.
 ### Create the folder structure
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Outlets/Queries/GetOutlets
+mkdir -p src/Nastart.Application/Features/Outlets/Queries/GetOutlets
 ```
 
 ### The Query (request object)
 
-**File:** `src/RecipeCost.Application/Features/Outlets/Queries/GetOutlets/GetOutletsQuery.cs`
+**File:** `src/Nastart.Application/Features/Outlets/Queries/GetOutlets/GetOutletsQuery.cs`
 
 ```csharp
 using MediatR;
 
-namespace RecipeCost.Application.Features.Outlets.Queries.GetOutlets;
+namespace Nastart.Application.Features.Outlets.Queries.GetOutlets;
 
 // This is a Query (read-only) — it returns a list of outlets for a given company.
 // Implements IRequest<T> so MediatR knows the return type.
@@ -163,10 +163,10 @@ public record GetOutletsQuery(Guid CompanyId) : IRequest<List<GetOutletsResponse
 
 ### The Response DTO
 
-**File:** `src/RecipeCost.Application/Features/Outlets/Queries/GetOutlets/GetOutletsResponse.cs`
+**File:** `src/Nastart.Application/Features/Outlets/Queries/GetOutlets/GetOutletsResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Outlets.Queries.GetOutlets;
+namespace Nastart.Application.Features.Outlets.Queries.GetOutlets;
 
 // Response DTO — only the data the API consumer needs.
 // This is NOT the Outlet entity. We never return domain entities directly.
@@ -175,14 +175,14 @@ public record GetOutletsResponse(Guid Id, string Name, DateTimeOffset CreatedAt)
 
 ### The Handler
 
-**File:** `src/RecipeCost.Application/Features/Outlets/Queries/GetOutlets/GetOutletsHandler.cs`
+**File:** `src/Nastart.Application/Features/Outlets/Queries/GetOutlets/GetOutletsHandler.cs`
 
 ```csharp
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Outlets.Queries.GetOutlets;
+namespace Nastart.Application.Features.Outlets.Queries.GetOutlets;
 
 public class GetOutletsHandler : IRequestHandler<GetOutletsQuery, List<GetOutletsResponse>>
 {
@@ -223,17 +223,17 @@ public class GetOutletsHandler : IRequestHandler<GetOutletsQuery, List<GetOutlet
 Now a write operation. Commands change state — they insert, update, or delete data.
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Outlets/Commands/CreateOutlet
+mkdir -p src/Nastart.Application/Features/Outlets/Commands/CreateOutlet
 ```
 
 ### The Command
 
-**File:** `src/RecipeCost.Application/Features/Outlets/Commands/CreateOutlet/CreateOutletCommand.cs`
+**File:** `src/Nastart.Application/Features/Outlets/Commands/CreateOutlet/CreateOutletCommand.cs`
 
 ```csharp
 using MediatR;
 
-namespace RecipeCost.Application.Features.Outlets.Commands.CreateOutlet;
+namespace Nastart.Application.Features.Outlets.Commands.CreateOutlet;
 
 // A Command mutates state — it creates a new outlet.
 // Returns the created outlet's response data.
@@ -242,24 +242,24 @@ public record CreateOutletCommand(string Name, Guid CompanyId) : IRequest<Create
 
 ### The Response
 
-**File:** `src/RecipeCost.Application/Features/Outlets/Commands/CreateOutlet/CreateOutletResponse.cs`
+**File:** `src/Nastart.Application/Features/Outlets/Commands/CreateOutlet/CreateOutletResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Outlets.Commands.CreateOutlet;
+namespace Nastart.Application.Features.Outlets.Commands.CreateOutlet;
 
 public record CreateOutletResponse(Guid Id, string Name);
 ```
 
 ### The Handler
 
-**File:** `src/RecipeCost.Application/Features/Outlets/Commands/CreateOutlet/CreateOutletHandler.cs`
+**File:** `src/Nastart.Application/Features/Outlets/Commands/CreateOutlet/CreateOutletHandler.cs`
 
 ```csharp
 using MediatR;
-using RecipeCost.Application.Common.Interfaces;
-using RecipeCost.Domain.Entities;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Domain.Entities;
 
-namespace RecipeCost.Application.Features.Outlets.Commands.CreateOutlet;
+namespace Nastart.Application.Features.Outlets.Commands.CreateOutlet;
 
 public class CreateOutletHandler : IRequestHandler<CreateOutletCommand, CreateOutletResponse>
 {
@@ -303,14 +303,14 @@ Endpoints live in the API project. They do three things and nothing else:
 
 > ⚠️ **v2-only — do not build in v1.** The `OutletEndpoints.cs` file below is the original multi-tenant teaching example. In v1 (single-user), skip this file entirely. The v1 endpoint is `IngredientEndpoints.cs` shown in section 9.
 
-**File:** `src/RecipeCost.API/Endpoints/OutletEndpoints.cs`
+**File:** `src/Nastart.API/Endpoints/OutletEndpoints.cs`
 
 ```csharp
 using MediatR;
-using RecipeCost.Application.Features.Outlets.Commands.CreateOutlet;
-using RecipeCost.Application.Features.Outlets.Queries.GetOutlets;
+using Nastart.Application.Features.Outlets.Commands.CreateOutlet;
+using Nastart.Application.Features.Outlets.Queries.GetOutlets;
 
-namespace RecipeCost.API.Endpoints;
+namespace Nastart.API.Endpoints;
 
 public static class OutletEndpoints
 {
@@ -344,9 +344,9 @@ public static class OutletEndpoints
 Register the endpoints in `Program.cs`:
 
 ```csharp
-using RecipeCost.Application;
-using RecipeCost.Infrastructure;
-using RecipeCost.API.Endpoints;
+using Nastart.Application;
+using Nastart.Infrastructure;
+using Nastart.API.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -393,23 +393,23 @@ Notice: the endpoint never imported `CreateOutletHandler`. MediatR found it auto
 Build one more slice to solidify the pattern. Ingredients are scoped to the logged-in user (not outlets).
 
 ```bash
-mkdir -p src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredients
+mkdir -p src/Nastart.Application/Features/Ingredients/Queries/GetIngredients
 ```
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsQuery.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsQuery.cs`
 
 ```csharp
 using MediatR;
 
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredients;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
 public record GetIngredientsQuery(Guid UserId) : IRequest<List<IngredientListResponse>>;
 ```
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredients/IngredientListResponse.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredients/IngredientListResponse.cs`
 
 ```csharp
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredients;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
 public record IngredientListResponse(
     Guid Id,
@@ -420,14 +420,14 @@ public record IngredientListResponse(
     decimal PriceSpikeThresholdPct);
 ```
 
-**File:** `src/RecipeCost.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsHandler.cs`
+**File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsHandler.cs`
 
 ```csharp
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using RecipeCost.Application.Common.Interfaces;
+using Nastart.Application.Common.Interfaces;
 
-namespace RecipeCost.Application.Features.Ingredients.Queries.GetIngredients;
+namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
 public class GetIngredientsHandler
     : IRequestHandler<GetIngredientsQuery, List<IngredientListResponse>>
@@ -460,13 +460,13 @@ public class GetIngredientsHandler
 }
 ```
 
-**File:** `src/RecipeCost.API/Endpoints/IngredientEndpoints.cs`
+**File:** `src/Nastart.API/Endpoints/IngredientEndpoints.cs`
 
 ```csharp
 using MediatR;
-using RecipeCost.Application.Features.Ingredients.Queries.GetIngredients;
+using Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
-namespace RecipeCost.API.Endpoints;
+namespace Nastart.API.Endpoints;
 
 public static class IngredientEndpoints
 {
@@ -501,7 +501,7 @@ app.MapIngredientEndpoints();
 After this lesson, your Application project looks like:
 
 ```
-src/RecipeCost.Application/
+src/Nastart.Application/
 ├── Common/
 │   ├── Behaviors/          ← empty (populated in L4)
 │   └── Interfaces/
@@ -539,7 +539,7 @@ Each feature is a vertical slice — everything needed for that operation is in 
 dotnet build
 
 # 2. Start the API
-dotnet run --project src/RecipeCost.API
+dotnet run --project src/Nastart.API
 
 # 3. Test the health endpoint first
 curl http://localhost:5000/health
