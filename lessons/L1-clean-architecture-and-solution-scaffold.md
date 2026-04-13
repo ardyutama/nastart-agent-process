@@ -167,12 +167,12 @@ dotnet add tests/Nastart.Tests reference src/Nastart.Application
 dotnet add tests/Nastart.Tests reference src/Nastart.Domain
 
 # Add test helper packages
-dotnet add tests/Nastart.Tests package FluentAssertions
+dotnet add tests/Nastart.Tests package AwesomeAssertions
 dotnet add tests/Nastart.Tests package NSubstitute
 ```
 
-> **Test framework — xUnit vs MSTest.Sdk:** This project uses **xUnit**. For new .NET projects, the current best-practice recommendation is **MSTest.Sdk** (`<Sdk Name="MSTest.Sdk">`): it requires fewer package references, supports sealed test classes for performance, and provides richer built-in assertions (`Assert.ThrowsExactly`, `Assert.HasCount`, `Assert.ContainsSingle`) without an additional library. xUnit is kept here because it pairs naturally with FluentAssertions and NSubstitute, which are already part of this setup. If you prefer MSTest, replace `dotnet new xunit` with `dotnet new mstest`, swap `[Fact]` for `[TestMethod]`/`[TestClass]`, and remove the FluentAssertions package in favour of MSTest's native assertions. Both frameworks have full `dotnet test`, VS Test Explorer, and GitHub Actions support.
-> **FluentAssertions:** `result.Should().Be(expected)` — readable assertion syntax (used with xUnit in this project).
+> **Test framework — xUnit vs MSTest.Sdk:** This project uses **xUnit**. For new .NET projects, the current best-practice recommendation is **MSTest.Sdk** (`<Sdk Name="MSTest.Sdk">`): it requires fewer package references, supports sealed test classes for performance, and provides richer built-in assertions (`Assert.ThrowsExactly`, `Assert.HasCount`, `Assert.ContainsSingle`) without an additional library. xUnit is kept here because it pairs naturally with AwesomeAssertions and NSubstitute, which are already part of this setup. If you prefer MSTest, replace `dotnet new xunit` with `dotnet new mstest`, swap `[Fact]` for `[TestMethod]`/`[TestClass]`, and remove the AwesomeAssertions package in favour of MSTest's native assertions. Both frameworks have full `dotnet test`, VS Test Explorer, and GitHub Actions support.
+> **AwesomeAssertions:** `result.Should().Be(expected)` — readable assertion syntax (used with xUnit in this project). A free, MIT-licensed fork of FluentAssertions with an identical API.
 > **NSubstitute:** `Substitute.For<IAppDbContext>()` — creates mock implementations of interfaces for unit testing without a real database.
 
 ### Set up project references (the dependency rule)
@@ -211,7 +211,7 @@ nastart/
 │       ├── Nastart.API.csproj
 │       └── Program.cs
 └── tests/
-    └── Nastart.Tests/             ← unit tests (xUnit + FluentAssertions + NSubstitute)
+    └── Nastart.Tests/             ← unit tests (xUnit + AwesomeAssertions + NSubstitute)
         └── Nastart.Tests.csproj
 ```
 
@@ -361,7 +361,7 @@ namespace Nastart.Domain.Common;
 
 public abstract class BaseEntity
 {
-    public Guid Id { get; set; }
+    public Guid Id { get; set; } = Guid.CreateVersion7();
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
 }
@@ -369,11 +369,13 @@ public abstract class BaseEntity
 
 All entities will inherit from this. EF Core will map `Id` as the primary key, and `CreatedAt`/`UpdatedAt` will be set automatically (configured in L2's DbContext).
 
+> **Why `Guid.CreateVersion7()`:** UUID v7 is time-ordered — new rows always sort to the end of the database B-tree index, eliminating the random page splits that UUID v4 causes on every insert. This is a built-in .NET 9+ API (no packages needed). The ID is generated in C# at instantiation time, so it's available before the entity is saved to the database.
+
 ---
 
 ## 6. Your First Unit Test — Verifying the Test Setup
 
-Before writing handlers in L3+, verify the test infrastructure works. Create one smoke test to confirm xUnit, NSubstitute, and FluentAssertions are correctly wired together.
+Before writing handlers in L3+, verify the test infrastructure works. Create one smoke test to confirm xUnit, NSubstitute, and AwesomeAssertions are correctly wired together.
 
 ```bash
 mkdir tests/Nastart.Tests/Smoke
@@ -382,7 +384,7 @@ mkdir tests/Nastart.Tests/Smoke
 **File:** `tests/Nastart.Tests/Smoke/InfrastructureSmokeTest.cs`
 
 ```csharp
-using FluentAssertions;
+using AwesomeAssertions;
 using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 
@@ -396,9 +398,9 @@ public class InfrastructureSmokeTest
         // Arrange — NSubstitute creates a mock of IAppDbContext
         var db = Substitute.For<IAppDbContext>();
 
-        // Assert — FluentAssertions verifies the mock is not null
+        // Assert — AwesomeAssertions verifies the mock is not null
         db.Should().NotBeNull(
-            "NSubstitute and FluentAssertions packages are installed correctly");
+            "NSubstitute and AwesomeAssertions packages are installed correctly");
     }
 }
 ```
@@ -409,7 +411,7 @@ dotnet test tests/Nastart.Tests
 # Test name: Nastart.Tests.Smoke.InfrastructureSmokeTest.TestInfrastructure_ShouldWork
 ```
 
-> **What this proves:** xUnit discovered the test, NSubstitute created a mock of `IAppDbContext`, and FluentAssertions made an assertion without crashing. TDD infrastructure is ready.
+> **What this proves:** xUnit discovered the test, NSubstitute created a mock of `IAppDbContext`, and AwesomeAssertions made an assertion without crashing. TDD infrastructure is ready.
 
 > **Test-first rule from L3 onward:** Every feature handler gets a failing test written BEFORE the handler code. This smoke test confirms the harness works so you can follow that rule from the first slice.
 
