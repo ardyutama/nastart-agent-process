@@ -664,7 +664,7 @@ public class DeleteIngredientHandler
         if (ingredient is null || ingredient.UserId != command.UserId)
             return Error.Forbidden("Ingredient.AccessDenied", "You do not have access to this ingredient.");
 
-        // Note (L7 future): In Phase 2, RecipeItem.IngredientId uses OnDelete(Restrict).
+        // Note (L8): When Recipe/RecipeItem are built in L8, RecipeItem.IngredientId uses OnDelete(Restrict).
         // At that point, deleting an ingredient used in recipes will fail at the DB constraint level.
         // In a production app, upgrade this handler to explicitly query RecipeItems and return
         // 409 Conflict if the ingredient is still in use, with a clear message to remove it from recipes first.

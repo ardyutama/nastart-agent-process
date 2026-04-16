@@ -173,11 +173,11 @@ public DbSet<CascadeErrorLog> CascadeErrorLogs => Set<CascadeErrorLog>();
 
 ## 5. EF Core Entity Configurations
 
-Create these configuration files in `src/Nastart.Infrastructure/Data/Configurations/`.
+Create these configuration files in `src/Nastart.Infrastructure/Persistence/Configurations/`.
 
 ### RecipeConfiguration
 
-**File:** `src/Nastart.Infrastructure/Data/Configurations/RecipeConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/RecipeConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
@@ -235,7 +235,7 @@ public class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
 
 ### RecipeItemConfiguration
 
-**File:** `src/Nastart.Infrastructure/Data/Configurations/RecipeItemConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/RecipeItemConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
@@ -301,7 +301,7 @@ public class RecipeItemConfiguration : IEntityTypeConfiguration<RecipeItem>
 
 ### CascadeErrorLogConfiguration
 
-**File:** `src/Nastart.Infrastructure/Data/Configurations/CascadeErrorLogConfiguration.cs`
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/CascadeErrorLogConfiguration.cs`
 
 ```csharp
 using Microsoft.EntityFrameworkCore;

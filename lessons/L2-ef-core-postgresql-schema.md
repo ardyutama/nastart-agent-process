@@ -665,6 +665,8 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<IngredientPriceHistory> IngredientPriceHistories => Set<IngredientPriceHistory>();
     public DbSet<Unit> Units => Set<Unit>();
     public DbSet<Category> Categories => Set<Category>();
+    // Added in L7 — entities and configurations are defined in that lesson.
+    // Comment these out until you reach L7, or EF Core will fail to build the model.
     public DbSet<Recipe> Recipes => Set<Recipe>();
     public DbSet<RecipeItem> RecipeItems => Set<RecipeItem>();
     public DbSet<CascadeErrorLog> CascadeErrorLogs => Set<CascadeErrorLog>();
@@ -716,6 +718,7 @@ public interface IAppDbContext
     DbSet<IngredientPriceHistory> IngredientPriceHistories { get; }
     DbSet<Unit> Units { get; }
     DbSet<Category> Categories { get; }
+    // Added in L7 — comment these out until you reach L7.
     DbSet<Recipe> Recipes { get; }
     DbSet<RecipeItem> RecipeItems { get; }
     DbSet<CascadeErrorLog> CascadeErrorLogs { get; }
@@ -1070,16 +1073,15 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
             .HasForeignKey(p => p.IngredientId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // P0: Explicit OnDelete for the forward-declared nullable FK.
-        // C-5: Cascade errors never roll back price history. When an InvoiceLineItem is
-        // deleted (Phase 3), its price records are preserved — the link is nulled.
-        // InvoiceLineItem entity is built in L12–L14; this configures the FK constraint now
-        // so the Phase 3 migration does not need to retroactively alter the column.
-        builder.HasOne<InvoiceLineItem>()
-            .WithMany()
-            .HasForeignKey(p => p.InvoiceLineItemId)
-            .OnDelete(DeleteBehavior.SetNull)
-            .IsRequired(false);
+        // ⚠️ Defer to L12 — InvoiceLineItem entity is built in Phase 3 (L12–L14).
+        // Un-comment this block when you add the InvoiceLineItem entity in L12.
+        // C-5: When an InvoiceLineItem is deleted, its price records are preserved (the FK is nulled).
+        //
+        // builder.HasOne<InvoiceLineItem>()
+        //     .WithMany()
+        //     .HasForeignKey(p => p.InvoiceLineItemId)
+        //     .OnDelete(DeleteBehavior.SetNull)
+        //     .IsRequired(false);
 
         // P1: Partial index on the nullable FK — skips the majority of NULL rows,
         // so Phase 3 invoice lookups remain fast without bloating the index.
@@ -1357,6 +1359,6 @@ dotnet run --project src/Nastart.API
 
 | Entity | Phase | Lesson |
 |---|---|---|
-| Recipe, RecipeItem | Phase 2 | L9 |
-| CascadeErrorLog | Phase 2 | L8 |
+| Recipe, RecipeItem | Phase 2 | L7–L8 |
+| CascadeErrorLog | Phase 2 | L7 |
 | Invoice, InvoiceLineItem, ReviewQueueItem | Phase 3 | L12 |
