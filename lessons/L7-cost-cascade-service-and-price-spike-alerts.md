@@ -199,17 +199,27 @@ public class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
         // Name must be unique per user
         entity.HasIndex(r => new { r.UserId, r.Name })
             .IsUnique()
-            .HasDatabaseName("ix_recipe_user_name_unique");
+            .HasDatabaseName("ix_recipes_user_id_name");
         
         entity.Property(r => r.CostPerPortion)
             .HasPrecision(18, 4);
         
         // v2-only: SellingPrice removed in v1 — sell price is derived at read time
-        
         // v2-only: CostThresholdPercentage removed in v1 — single user sees all alerts
         
         entity.Property(r => r.PackagingCost).HasPrecision(10, 4).HasDefaultValue(0);
         entity.Property(r => r.TargetMargin).HasPrecision(5, 4).HasDefaultValue(0);
+
+        // P0: Index for fetching the latest version in a recipe group (dashboard, cascade).
+        // Query pattern: WHERE version_group_id = @id ORDER BY version_number DESC LIMIT 1
+        entity.HasIndex(r => new { r.VersionGroupId, r.VersionNumber })
+            .IsDescending(false, true)   // VersionGroupId ASC, VersionNumber DESC
+            .HasDatabaseName("ix_recipes_version_group_number");
+
+        // P0: Index for listing all recipe groups belonging to a user (recipe list screen).
+        // Query pattern: WHERE user_id = @id GROUP BY version_group_id
+        entity.HasIndex(r => new { r.UserId, r.VersionGroupId })
+            .HasDatabaseName("ix_recipes_user_version_group");
         
         // FK to user — cascade delete: deleting user deletes recipes
         entity.HasOne(r => r.User).WithMany(u => u.Recipes).HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
@@ -246,12 +256,45 @@ public class RecipeItemConfiguration : IEntityTypeConfiguration<RecipeItem>
         // YieldPercentage supports up to 9.9999 (e.g., 0.85 = 85%)
         entity.Property(ri => ri.YieldPercentage)
             .HasPrecision(5, 4);
-        
+
+        // P0 — DESIGN DECISION: UnitSizeSnapshot
+        // The C-2 cost formula is: (price / unit_size) * quantity * (1 / yield).
+        // unit_size is read from WHERE? If read from Ingredient.UnitSize (live), a user
+        // changing the ingredient from a 1 kg to a 500 g bag silently doubles all attached
+        // recipe costs retroactively — without any new price entry firing the cascade.
+        //
+        // Decision A (recommended): Add UnitSizeSnapshot to RecipeItem.
+        //   Snapshot the ingredient's unit_size at item creation time.
+        //   CostCascadeService uses item.UnitSizeSnapshot in the formula, not Ingredient.UnitSize.
+        //   Changing unit_size on an ingredient does NOT silently reprice existing recipe items.
+        //   Requires a new column below and handler changes (see L8).
+        //
+        // Decision B: Omit snapshot, treat unit_size change as a breaking edit.
+        //   Developer rule: changing Ingredient.UnitSize always requires a new price entry
+        //   (which fires the cascade and recalculates using the new unit_size).
+        //   Risk: if a user only changes unit_size without a new price, costs are silently wrong.
+        //
+        // *** CHOOSE BEFORE FIRST MIGRATION — cannot add this column without a migration after ***
+        //
+        // If choosing Decision A, add this to RecipeItem.cs:
+        //   public decimal UnitSizeSnapshot { get; set; }
+        //
+        // And uncomment this block:
+        // entity.Property(ri => ri.UnitSizeSnapshot)
+        //     .HasPrecision(10, 4);
+        // entity.HasCheckConstraint(
+        //     "ck_recipe_item_unit_size_snapshot_positive",
+        //     "unit_size_snapshot > 0");
+
         // FK to ingredient — RESTRICT delete: cannot delete an ingredient used in recipes
         entity.HasOne(ri => ri.Ingredient)
             .WithMany()
             .HasForeignKey(ri => ri.IngredientId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // P0: FK index — PostgreSQL does not auto-create indexes on FK columns.
+        entity.HasIndex(ri => ri.IngredientId)
+            .HasDatabaseName("ix_recipe_items_ingredient_id");
     }
 }
 ```
@@ -274,11 +317,23 @@ public class CascadeErrorLogConfiguration : IEntityTypeConfiguration<CascadeErro
         entity.HasKey(c => c.Id);
         
         entity.Property(c => c.ErrorMessage)
-            .HasMaxLength(2000);
-        
-        // Index on (IngredientId, CreatedAt) for looking up errors by ingredient
-        entity.HasIndex(c => new { c.IngredientId, c.Id })
-            .HasDatabaseName("ix_cascadeerrorlog_ingredient_id");
+            .HasMaxLength(2000)
+            .IsRequired();
+
+        // C-5: Intentionally NO FK constraints on IngredientId or RecipeId.
+        // CascadeErrorLog is an immutable audit record. If an ingredient or recipe is
+        // later deleted, the error log must persist — it preserves the incident history.
+        // Bare GUIDs retain the original IDs without referential integrity enforcement.
+        // Query performance is maintained via indexes below.
+
+        // Index for querying all errors for a specific ingredient
+        entity.HasIndex(c => c.IngredientId)
+            .HasDatabaseName("ix_cascade_error_logs_ingredient_id");
+
+        // Composite index: error history for a recipe, newest first (audit view)
+        entity.HasIndex(c => new { c.RecipeId, c.CreatedAt })
+            .IsDescending(false, true)   // RecipeId ASC, CreatedAt DESC
+            .HasDatabaseName("ix_cascade_error_logs_recipe_created");
     }
 }
 ```
@@ -477,9 +532,20 @@ public class CostCascadeService : ICostCascadeService
             // C-2 formula:
             // item_cost = (price / unitSize) * quantity * (1 / yieldPercentage)
             //
-            // Example:
+            // P1 — UnitSize source depends on P0-a design decision:
+            //   Decision A (UnitSizeSnapshot on RecipeItem): use item.UnitSizeSnapshot
+            //     → Isolated: changing Ingredient.UnitSize does NOT silently reprice this item.
+            //   Decision B (no snapshot): use item.Ingredient.UnitSize (live value)
+            //     → Risk: changing Ingredient.UnitSize reprices all historical recipe items.
+            //
+            // If Decision A was chosen, replace item.Ingredient.UnitSize with item.UnitSizeSnapshot:
+            // var itemCost = (latestPrice.Value / item.UnitSizeSnapshot)
+            //              * item.Quantity
+            //              * (1m / item.YieldPercentage);
+            //
+            // Example with Decision B (current):
             //   - price = 100 (per unit from IngredientPriceHistory)
-            //   - unitSize = 10 (kg — from Ingredient)
+            //   - unitSize = 10 (kg — from Ingredient.UnitSize, live)
             //   - quantity = 2 (kg — from RecipeItem)
             //   - yieldPercentage = 0.85 (85% usable, 15% waste)
             //   - item_cost = (100/10) * 2 * (1/0.85) = 10 * 2 * 1.176 = 23.53
@@ -506,6 +572,24 @@ public class CostCascadeService : ICostCascadeService
 
         // v1: Sell price is derived at read time — (CostPerPortion + PackagingCost) / (1 - TargetMargin)
         // No stored threshold to check in v1. Personal Telegram spike alerts dispatched below.
+
+        // P1 — HANDLER RULE: Cascade must be called on ALL cost-affecting mutations, not just price changes.
+        // The cascade service is triggered by price entries (the primary path), but cost also changes when:
+        //   - RecipeItem.Quantity changes
+        //   - RecipeItem.YieldPercentage changes
+        //   - Recipe.PortionCount changes
+        //   - A RecipeItem is added or removed
+        //
+        // In each structural mutation handler (UpdateRecipeItemQuantityHandler, etc.), call:
+        //
+        // var affectedIngredientIds = recipe.RecipeItems
+        //     .Select(ri => ri.IngredientId)
+        //     .Distinct()
+        //     .ToList();
+        // foreach (var ingredientId in affectedIngredientIds)
+        //     await _costCascadeService.RecalculateForIngredientAsync(ingredientId, ct);
+        //
+        // C-1: No price param — service re-reads latest price internally.
     }
 }
 ```

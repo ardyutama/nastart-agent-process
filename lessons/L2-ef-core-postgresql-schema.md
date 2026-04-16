@@ -37,44 +37,143 @@
 
 ## 1. Docker Compose — Local PostgreSQL
 
-Before we write any entity code, we need a running database. Create this at the project root:
+Before we write any entity code, we need a running database.
+
+### 1a. Create the secrets file
+
+The database password lives in a plain-text file that Docker mounts inside the container. **This file is never committed to version control.**
+
+```bash
+# Create the folder that will hold all local secret files
+mkdir secrets
+```
+
+**File:** `secrets/db_password.txt`
+
+```
+dev_password
+```
+
+> The file contains only the password — no quotes, no newline at the end. PostgreSQL reads it via the `POSTGRES_PASSWORD_FILE` env var and uses the raw contents as the password.
+
+Now protect it from accidental commits. Add these lines to your **`.gitignore`** at the project root (create the file if it doesn't exist):
+
+```gitignore
+# Local secrets — never commit these
+secrets/
+
+# .NET development overrides — contains connection strings with passwords
+appsettings.Development.json
+```
+
+### 1b. Docker Compose
 
 **File:** `docker-compose.yml`
 
 ```yaml
+# docker-compose.yml
+# Compose v2 spec — no "version:" field needed (deprecated and ignored by modern Docker)
+
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine  # PostgreSQL 18 on lightweight Alpine Linux (~80 MB vs ~400 MB full)
+
     environment:
-      POSTGRES_DB: recipe_cost_dev
-      POSTGRES_USER: dev
-      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: recipe_cost_dev             # Database Docker will create on first startup
+      POSTGRES_USER: dev                       # Username your app connects with
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password  # Reads password from the mounted secret file
+                                                         # Never use POSTGRES_PASSWORD here — that puts
+                                                         # the plaintext password in a file you may commit
+
+    secrets:
+      - db_password  # Mounts secrets/db_password.txt as a read-only file at /run/secrets/db_password
+                     # Only this container can read it — it is never exposed as an environment variable
+
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432" # host_ip:host_port:container_port
+                               # 127.0.0.1 binds only to localhost — not exposed on your LAN/Wi-Fi
+                               # Your .NET API on the host reaches it via Host=localhost;Port=5432
+
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data # Named volume: your database rows survive
+                                               # "docker compose down"    -- data persists
+                                               # "docker compose down -v" -- data is wiped
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d recipe_cost_dev"]
+      interval: 5s      # Check container health every 5 seconds
+      timeout: 5s       # Fail the check if no response within 5 seconds
+      retries: 5        # Mark unhealthy after 5 consecutive failures
+      start_period: 10s # Give Postgres 10 seconds to initialise before checks begin
 
 volumes:
-  postgres_data:
+  postgres_data: # Named volume definition — Docker manages the storage location
+                 # Run "docker volume ls" to see it; "docker volume inspect postgres_data" for details
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt  # Compose reads this file from disk and mounts it inside the container
+                                     # Change the password here without ever touching docker-compose.yml
 ```
+
+> **What just happened?**
+>
+> **Docker secrets (`POSTGRES_PASSWORD_FILE`):** Instead of writing the password directly into `docker-compose.yml`, we put it in a separate file (`secrets/db_password.txt`) and tell Compose to mount it inside the container at `/run/secrets/db_password`. PostgreSQL's official image reads the `_FILE`-suffixed variable and loads the password from that path. The result: `docker-compose.yml` contains zero secrets and is safe to commit.
+>
+> **Detached mode (`-d`):** `docker compose up -d` starts the container in the background. Your terminal returns immediately — the container keeps running until you stop it.
+>
+> **Port mapping (`127.0.0.1:5432:5432`):** This tells Docker: forward traffic arriving at `localhost:5432` on your machine into port `5432` inside the container. The `127.0.0.1` prefix locks the binding to your local loopback only — the port is invisible to other devices on your network.
+>
+> **How the connection string finds the container:** Your .NET API runs directly on Windows (not in Docker). When EF Core reads `Host=localhost;Port=5432`, it connects to `localhost:5432` on the host machine. Docker intercepts that traffic and routes it into the Postgres container. From the API's perspective, Postgres is just another local process.
+>
+> **Named volumes:** `postgres_data` is a Docker-managed storage area that lives outside the container. When you run `docker compose down`, the container is removed but the volume — and all your data — survives. Only `docker compose down -v` destroys the volume.
+>
+> **Why no `depends_on` here?** `depends_on` links two services defined in the same `docker-compose.yml`. In v1, the .NET API runs directly on your host machine — it is not a Compose service — so there is nothing to wire up. When we containerise the full stack in a later phase, `depends_on` with `condition: service_healthy` will use the health check above to ensure Postgres is ready before the API starts.
 
 ```bash
-# Start PostgreSQL
+# ── Start ──────────────────────────────────────────────────────────────────────
+
+# Start the postgres container in detached mode (runs in the background, terminal returns immediately)
 docker compose up -d
 
-# Verify it's running
+# Check container status — look for "healthy" under Status (appears after ~15 seconds)
 docker compose ps
-# Should show postgres service as "running"
+
+# Stream Postgres logs to your terminal — useful to confirm startup or debug connection errors
+# Press Ctrl+C to stop following; the container keeps running
+docker compose logs -f postgres
+
+# ── Teardown ───────────────────────────────────────────────────────────────────
+
+# Stop and remove the container — your data is SAFE (the named volume persists)
+docker compose down
+
+# Stop, remove the container AND wipe all database data — use when you want a clean slate
+# Warning: this deletes every table, row, and migration history stored in the volume
+docker compose down -v
+
+# View all Docker volumes (confirm postgres_data still exists after "docker compose down")
+docker volume ls
 ```
 
+> **Windows users — Docker Desktop**
+>
+> - **Install Docker Desktop for Windows** from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop). Enable the WSL 2 backend when prompted — it is significantly faster than Hyper-V for Linux containers.
+> - **Ensure Docker Desktop is running** before any `docker compose` command. Look for the whale icon in the system tray. If absent, launch Docker Desktop from the Start menu.
+> - **Use PowerShell or Windows Terminal** — all `docker compose` commands work identically. Avoid Git Bash for interactive commands like `docker exec -it ... psql`, as terminal emulation can cause display issues.
+> - **Named volumes are WSL 2-managed** — `postgres_data` lives inside the WSL 2 VM. You do not need to worry about Windows path separators.
+> - **Port conflicts:** If port 5432 is already in use (e.g., a local PostgreSQL installation), stop the local service first, or change the host port to `"127.0.0.1:5433:5432"` and update your connection string `Port` to `5433`.
+
 ### Connection string
+
+The connection string is split across two files. `appsettings.json` contains a safe-to-commit placeholder; `appsettings.Development.json` (gitignored) overrides it with the real password for local dev.
 
 **File:** `src/Nastart.API/appsettings.json`
 
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Port=5432;Database=recipe_cost_dev;Username=dev;Password=dev_password"
+    "DefaultConnection": "Host=localhost;Port=5432;Database=recipe_cost_dev;Username=dev;Password=PLACEHOLDER"
   },
   "Logging": {
     "LogLevel": {
@@ -85,7 +184,21 @@ docker compose ps
 }
 ```
 
-> **For production:** Override via environment variable `ConnectionStrings__DefaultConnection` or use `appsettings.Production.json`. Never commit production credentials.
+**File:** `src/Nastart.API/appsettings.Development.json` ← **gitignored, never committed**
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Host=localhost;Port=5432;Database=recipe_cost_dev;Username=dev;Password=dev_password"
+  }
+}
+```
+
+> **How ASP.NET Core merges these:** At startup, .NET loads `appsettings.json` first, then `appsettings.Development.json` on top. The `Development` file overrides any matching key — so `DefaultConnection` gets the real password at runtime without ever existing in a committed file.
+>
+> The password in `appsettings.Development.json` must match what is in `secrets/db_password.txt`. Both files are gitignored. To change the password: update both files and restart the container with `docker compose down && docker compose up -d`.
+>
+> **For production:** Set the `ConnectionStrings__DefaultConnection` environment variable on the server (or use a secrets manager). `appsettings.Development.json` is never deployed.
 
 ---
 
@@ -376,6 +489,11 @@ public class Unit : BaseEntity
     public string Abbreviation { get; set; } = string.Empty; // e.g. "kg", "L", "pc"
 }
 ```
+
+> **Design decision — Unit table scope:**
+> `Unit` has no `UserId`. This makes units a shared system catalogue (e.g., "kg", "L", "piece") seeded at startup and shared by all users. In v1 (single user), this is functionally equivalent to user-scoped.
+> In v2, if users need custom units, add a nullable `UserId` column with a partial unique index: `(name) WHERE user_id IS NULL` for system units and `(user_id, name)` for user-defined units.
+> **v1 action required:** Seed the standard unit catalogue in a migration or startup service.
 
 ### Category
 
@@ -674,16 +792,71 @@ public interface IAppDbContext
 > ```
 >
 > **5. Raw SQL: `FromSqlInterpolated` only — never `FromSqlRaw` with user input**
-> `FromSqlInterpolated` binds parameters automatically. `FromSqlRaw` with string interpolation is a SQL injection risk:
+> `FromSqlInterpolated` binds parameters automatically. `FromSqlRaw` with string interpolation is a SQL injection risk.
+> Always select specific columns — `SELECT *` defeats covering indexes:
 > ```csharp
-> // Safe — parameters bound by EF Core
+> // Safe — specific columns selected, parameters bound by EF Core
 > var results = await _db.Ingredients
->     .FromSqlInterpolated($"SELECT * FROM ingredients WHERE user_id = {userId}")
+>     .FromSqlInterpolated($"SELECT id, name, unit_size FROM ingredients WHERE user_id = {userId}")
 >     .AsNoTracking()
 >     .ToListAsync(ct);
 >
 > // NEVER — SQL injection risk
 > // .FromSqlRaw($"SELECT * FROM ingredients WHERE user_id = '{userId}'")
+> ```
+>
+> **6. Always guard list queries with `Take()` — never return unbounded results**
+> For a single user with hundreds of ingredients, an unbounded `ToListAsync()` is safe today but
+> will degrade as data grows. Add a maximum page size to every list endpoint:
+> ```csharp
+> // Bad — returns every row for this user unconditionally
+> var all = await _db.Ingredients
+>     .Where(i => i.UserId == userId)
+>     .AsNoTracking()
+>     .ToListAsync(ct);
+>
+> // Good — cursor-based pagination (preferred) or at minimum a safety cap
+> var page = await _db.Ingredients
+>     .Where(i => i.UserId == userId && i.CreatedAt < cursor)
+>     .OrderByDescending(i => i.CreatedAt)
+>     .Take(50)   // ← cap prevents runaway queries
+>     .AsNoTracking()
+>     .ToListAsync(ct);
+> ```
+>
+> **7. Fetching current price in a list — use LINQ projection, not a loop**
+> C-3 says current price is always `ORDER BY committed_at DESC LIMIT 1` from `ingredient_price_histories` — never stored on `Ingredient`. A naive foreach loop fires one query per ingredient (N+1). Use a LINQ projection instead — EF Core / Npgsql translates it into a single SQL statement using the `(ingredient_id, committed_at DESC)` index:
+> ```csharp
+> // BAD — N+1: 500 ingredients = 500 separate price queries
+> var ingredients = await _db.Ingredients.Where(i => i.UserId == userId).ToListAsync(ct);
+> foreach (var i in ingredients)
+>     i.CurrentPrice = await _db.IngredientPriceHistories   // ← one query per row!
+>         .Where(p => p.IngredientId == i.Id)
+>         .OrderByDescending(p => p.CommittedAt)
+>         .Select(p => p.Price)
+>         .FirstOrDefaultAsync(ct);
+>
+> // GOOD — single SQL with indexed LIMIT 1 subselect per row (no schema change, C-3 preserved)
+> var ingredients = await _db.Ingredients
+>     .AsNoTracking()
+>     .Where(i => i.UserId == userId)
+>     .Select(i => new IngredientListDto
+>     {
+>         Id           = i.Id,
+>         Name         = i.Name,
+>         UnitSize     = i.UnitSize,
+>         CurrentPrice = i.PriceHistory  // ← EF generates: ORDER BY committed_at DESC LIMIT 1
+>             .OrderByDescending(p => p.CommittedAt)
+>             .Select(p => (decimal?)p.Price)
+>             .FirstOrDefault(),
+>         CommittedAt  = i.PriceHistory
+>             .OrderByDescending(p => p.CommittedAt)
+>             .Select(p => (DateTimeOffset?)p.CommittedAt)
+>             .FirstOrDefault()
+>     })
+>     .ToListAsync(ct);
+> // The composite index ix_ingredient_price_history_ingredient_committed covers this exactly.
+> // C-3 is preserved: current_price is never stored on Ingredient.
 > ```
 
 ---
@@ -711,7 +884,8 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 {
     public void Configure(EntityTypeBuilder<User> builder)
     {
-        builder.HasIndex(u => u.Email).IsUnique();
+        builder.HasIndex(u => u.Email).IsUnique()
+            .HasDatabaseName("users_email_idx");
         builder.Property(u => u.Email).HasMaxLength(255).IsRequired();
         builder.Property(u => u.Name).HasMaxLength(255).IsRequired();
         builder.Property(u => u.PasswordHash).HasMaxLength(255).IsRequired();
@@ -770,7 +944,10 @@ public class TelegramLinkConfiguration : IEntityTypeConfiguration<TelegramLink>
         // C-6: SHA-256 hash is always exactly 64 hex characters
         builder.Property(t => t.CodeHash).HasMaxLength(64).IsRequired();
 
-        // C-14: Column name is telegramUserId
+        // C-14: Column name is telegram_user_id.
+        // Note: HasColumnName() is no longer needed once UseSnakeCaseNamingConvention() is active —
+        // EF will generate snake_case automatically. Kept here as an explicit documentation anchor
+        // for the canonical decision; it is a no-op in practice when the convention is applied.
         builder.Property(t => t.TelegramUserId).HasColumnName("telegram_user_id");
 
         builder.Property(t => t.TelegramUsername).HasMaxLength(255);
@@ -785,8 +962,11 @@ public class TelegramLinkConfiguration : IEntityTypeConfiguration<TelegramLink>
             .HasMaxLength(20);
 
         // Index for querying links by user and status (used in linking + deactivation flows)
-        builder.HasIndex(t => t.CodeHash).IsUnique();
-        builder.HasIndex(t => new { t.UserId, t.Status });
+        // HasDatabaseName() ensures predictable snake_case index names in migration diffs.
+        builder.HasIndex(t => t.CodeHash).IsUnique()
+            .HasDatabaseName("telegram_links_code_hash_idx");
+        builder.HasIndex(t => new { t.UserId, t.Status })
+            .HasDatabaseName("telegram_links_user_id_status_idx");
 
         builder.HasOne(t => t.User)
             .WithMany(u => u.TelegramLinks)
@@ -810,11 +990,17 @@ public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
     public void Configure(EntityTypeBuilder<Ingredient> builder)
     {
         // Ingredient name is unique within a user's scope
-        builder.HasIndex(i => new { i.UserId, i.Name }).IsUnique();
+        builder.HasIndex(i => new { i.UserId, i.Name }).IsUnique()
+            .HasDatabaseName("ingredients_user_id_name_idx");
 
         builder.Property(i => i.Name).HasMaxLength(255).IsRequired();
         builder.Property(i => i.UnitSize).HasPrecision(10, 4);
         builder.Property(i => i.PriceSpikeThresholdPct).HasPrecision(5, 2);
+
+        // P1: CHECK constraints enforce data integrity at the database layer.
+        // FluentValidation enforces these at the API boundary — the DB check is a
+        // defence-in-depth guard against direct SQL inserts or migration seed errors.
+        builder.HasCheckConstraint("ck_ingredient_unit_size_positive", "unit_size > 0");
 
         builder.HasOne(i => i.User)
             .WithMany(u => u.Ingredients)
@@ -826,10 +1012,19 @@ public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
             .HasForeignKey(i => i.CategoryId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        // P1: PostgreSQL does NOT auto-create indexes on FK columns.
+        // Without this, every JOIN or filter on category_id does a full table scan.
+        builder.HasIndex(i => i.CategoryId)
+            .HasDatabaseName("ingredients_category_id_idx");
+
         builder.HasOne(i => i.Unit)
             .WithMany()
             .HasForeignKey(i => i.UnitId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // P1: Index on unit_id — same reason as category_id above.
+        builder.HasIndex(i => i.UnitId)
+            .HasDatabaseName("ingredients_unit_id_idx");
     }
 }
 ```
@@ -874,6 +1069,28 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
             .WithMany(i => i.PriceHistory)
             .HasForeignKey(p => p.IngredientId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // P0: Explicit OnDelete for the forward-declared nullable FK.
+        // C-5: Cascade errors never roll back price history. When an InvoiceLineItem is
+        // deleted (Phase 3), its price records are preserved — the link is nulled.
+        // InvoiceLineItem entity is built in L12–L14; this configures the FK constraint now
+        // so the Phase 3 migration does not need to retroactively alter the column.
+        builder.HasOne<InvoiceLineItem>()
+            .WithMany()
+            .HasForeignKey(p => p.InvoiceLineItemId)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
+        // P1: Partial index on the nullable FK — skips the majority of NULL rows,
+        // so Phase 3 invoice lookups remain fast without bloating the index.
+        builder.HasIndex(p => p.InvoiceLineItemId)
+            .HasFilter("invoice_line_item_id IS NOT NULL")
+            .HasDatabaseName("ingredient_price_histories_invoice_line_item_id_idx");
+
+        // P1: CHECK constraint — price must be positive.
+        // Defense-in-depth: FluentValidation also enforces this at the API boundary.
+        builder.HasCheckConstraint("ck_ingredient_price_history_price_positive", "price > 0");
+        builder.HasCheckConstraint("ck_ingredient_price_history_unit_size_positive", "unit_size > 0");
     }
 }
 ```
@@ -894,7 +1111,8 @@ public class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.Property(c => c.Name).HasMaxLength(255).IsRequired();
 
         // Category name is unique within a user's scope
-        builder.HasIndex(c => new { c.UserId, c.Name }).IsUnique();
+        builder.HasIndex(c => new { c.UserId, c.Name }).IsUnique()
+            .HasDatabaseName("categories_user_id_name_idx");
 
         builder.HasOne(c => c.User)
             .WithMany()
@@ -979,6 +1197,10 @@ public static class DependencyInjection
                 configuration.GetConnectionString("DefaultConnection"),
                 npgsqlOptions => npgsqlOptions.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName)
             )
+            // P0: Maps C# PascalCase to PostgreSQL snake_case for all table and column names.
+            // Without this, EF generates quoted "PascalCase" names that break raw SQL and
+            // psql introspection. Must be set BEFORE the first migration is generated.
+            .UseSnakeCaseNamingConvention()
         );
 
         // Register AppDbContext as IAppDbContext for DI
@@ -1096,18 +1318,22 @@ services.AddScoped<IEmailService, ConsoleEmailService>();
 ## Checkpoint — Verify Before Moving to L3
 
 ```bash
-# 1. Docker Postgres is running
+# 1. Docker Postgres is running and HEALTHY
+#    Wait for Status to show "healthy" — this confirms pg_isready passed and the DB accepts connections
+#    If it shows "starting", wait a few more seconds and re-run
 docker compose ps
 
 # 2. Solution builds
 dotnet build
 
 # 3. Migration applied without errors
+#    If this fails with "connection refused", Postgres isn't ready yet — wait for "healthy" first
 dotnet ef database update \
   --project src/Nastart.Infrastructure \
   --startup-project src/Nastart.API
 
 # 4. Tables exist in PostgreSQL
+#    Opens a psql shell inside the running container and runs "\dt" to list tables
 docker exec -it $(docker compose ps -q postgres) psql -U dev -d recipe_cost_dev -c "\dt"
 # Should show 9 tables (plus __EFMigrationsHistory)
 
