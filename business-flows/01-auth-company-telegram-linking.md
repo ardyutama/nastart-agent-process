@@ -1,8 +1,10 @@
 # Flow 01 — User Authentication, Company Setup & Telegram Linking
 
-> **Status:** ACCEPTED (Round 1) — Lead Architect validated, no defects
+> **Status:** HISTORICAL REFERENCE (Accepted in Round 1 for the earlier enterprise design)
 > **Service owner:** .NET 10 Web API + Python FastAPI (bot)
 > **Entities:** Company, Outlet, User, TelegramLink
+>
+> **Update (April 17, 2026):** This file is a historical enterprise onboarding reference. Do not implement `Company`, `Outlet`, `Invitation`, role assignment, or outlet-scoped JWTs for v1. The current v1 auth path is single-user register, verify, login, then optional Telegram linking using `TelegramLink` only.
 
 ---
 
@@ -72,7 +74,7 @@
 | 8 | Python FastAPI (bot) | Calls .NET 10 API with bot-secret header | .NET 10 API | codeHash=SHA256(code), telegram_user_id, telegram_username, bot_secret | - | - | 401 if invalid bot-secret |
 | 9 | .NET 10 API | Validates codeHash, TTL, status | PostgreSQL | codeHash | TelegramLink record | Expired → 410; Already confirmed → 409 | Reply error via bot |
 | 10 | .NET 10 API | Updates TelegramLink | PostgreSQL | TelegramLink.id, telegram_user_id, telegram_username | status='confirmed', telegramUserId set, linkedAt=NOW() | - | DB error → 500 |
-| 11 | Python FastAPI (bot) | Sends confirmation message to user | Telegram | telegramUserId | "Linked as [Name] — Role: [role]" | - | Log if delivery fails |
+| 11 | Python FastAPI (bot) | Sends confirmation message to user | Telegram | telegramUserId | "✓ Linked to your account as [Name]" | - | Log if delivery fails |
 | 12 | Vue.js | Detects link confirmation (SSE/polling) | Vue.js → .NET 10 | User.id | TelegramLink.status='confirmed' | - | Timeout → prompt to retry |
 
 **Re-link rule:** A User may have only one active (`status='confirmed'`) TelegramLink at a time. Generating a new code automatically sets previous pending records to 'unlinked'.

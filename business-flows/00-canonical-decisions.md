@@ -1,6 +1,8 @@
 # Canonical Decisions — Recipe Cost Management App
 
 > These are the locked, authoritative design decisions validated by the Lead Architect across all 5 business flows. Every implementation file, API contract, and database schema MUST conform to these. Do not deviate without updating all flows accordingly.
+>
+> **Update (April 17, 2026):** For the current single-user v1 build, C-1 through C-7, C-13, and C-14 remain active. C-8 through C-12 are preserved below as historical team-oriented reference and are superseded for v1 by `.github/context/v1-constraints.md` and `docs/decisions/ADR-001-single-user-v1-scope.md`.
 
 ---
 
@@ -95,6 +97,12 @@ Nothing is written to the `User` entity.
 
 ---
 
+## Historical v2-Only Decisions
+
+The decisions below are preserved for the earlier team-oriented design and are not active requirements for the current single-user v1 build.
+
+---
+
 ## C-8 — Canonical Roles
 
 Exactly four roles, no others:
@@ -126,7 +134,7 @@ There is NO `food_cost_alert_threshold` on `Outlet`.
 |---|---|---|---|---|
 | Owner | ✅ | ✅ | ✅ | ✅ |
 | Chef | ✅ | ❌ | ❌ | ❌ |
-| Procurement | ✅ | ❌ | ❌ ✅ (own context) | ✅ |
+| Procurement | ✅ | ❌ | ❌ | ✅ |
 | Viewer | ✅ | ❌ | ❌ | ❌ |
 
 Push alert payloads must be built separately per role — absent fields are not null, they are not present in the object.
@@ -167,12 +175,14 @@ Not `chatId`, not `TelegramChatId`, not `telegram_chat_id`. Use `telegramUserId`
 
 ## Advisory Notes (non-blocking — implementation team awareness)
 
+> **v1 note:** Advisory notes 2 and 5 below preserve enterprise terminology. For the current v1 build, alerts route directly to the single linked user and the ingredient threshold field is `Ingredient.PriceSpikeThreshold`.
+
 1. **Recipient resolution ownership**: .NET 10 API resolves TelegramLink recipients and passes `[{telegramUserId, userName}]` to Python FastAPI. FastAPI does NOT query the database directly for recipients.
 
-2. **Alert scope consistency**: Price ceiling and food cost threshold alerts are outlet-scoped. Verify price-spike notifications use `outletId` (not `companyId`) for consistent routing.
+2. **Alert scope consistency**: Historical v2 note only. In the team-oriented design, price ceiling and food cost threshold alerts are outlet-scoped. In v1, alert routing is direct to the single linked user.
 
 3. **Duplicate cascade calls**: When an invoice has two line items for the same ingredient, de-duplicate the `ingredientId` list before iterating cascade calls to avoid redundant recalculations.
 
 4. **Synchronous cascade latency**: The cascade runs synchronously in v1. Acceptable for MVP. Plan async background processing for Phase 4+.
 
-5. **`price_spike_threshold_pct` column**: Stored on `Ingredient` entity. Default 10%, configurable per ingredient.
+5. **Ingredient price spike threshold field**: In v1 the field is `Ingredient.PriceSpikeThreshold`. Earlier enterprise notes may refer to `price_spike_threshold_pct`.

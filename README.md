@@ -4,6 +4,8 @@
 
 This repo documents how GitHub Copilot agents were used systematically — from initial idea to architecture decisions to working code — to build a production-quality full-stack application. It is the process layer; [nastart](https://github.com/ardyutama/nastart) is the result.
 
+**Current v1 status:** the implementation target is a single-user solopreneur product. Start with [`AGENTS.md`](AGENTS.md), [`.github/context/v1-constraints.md`](.github/context/v1-constraints.md), [`docs/decisions/ADR-001-single-user-v1-scope.md`](docs/decisions/ADR-001-single-user-v1-scope.md), and [`docs/progress/00-current-status.md`](docs/progress/00-current-status.md) before relying on older planning artifacts.
+
 ---
 
 ## What's Inside
@@ -11,14 +13,28 @@ This repo documents how GitHub Copilot agents were used systematically — from 
 | Folder | Contents |
 |---|---|
 | [`lessons/`](lessons/) | 8 lessons covering Clean Architecture, EF Core schema, CQRS with MediatR, validation, JWT auth, ingredient management, cost cascade, and recipe costing engine |
-| [`business-flows/`](business-flows/) | Canonical architecture decisions (locked), auth flows, ingredient price management, recipe costing, invoice scanning, Telegram bot |
+| [`business-flows/`](business-flows/) | Canonical flow analysis and architecture history; some files preserve pre-v1 enterprise context and should be read with the v1 constraints |
 | [`personas/`](personas/) | Target user research — home bakers, F&B owners, head chefs, procurement, cost controllers |
 | [`flows/`](flows/) | Feature-level user flows: auth, recipe builder, ingredient management, invoice OCR, Telegram |
+| [`docs/decisions/`](docs/decisions/) | ADRs capturing durable architectural decisions and scope changes |
+| [`docs/progress/`](docs/progress/) | Current lesson status, revision ledger, and documentation sync notes |
 | [`docs/plans/`](docs/plans/) | Design documents produced during brainstorming sessions |
 | [`.github/skills/`](.github/skills/) | 20+ agent skill definitions — reusable instruction sets for brainstorming, TDD, planning, code review, security, and more |
 | [`.github/context/`](.github/context/) | Phase session context, v1 constraints, project map — loaded by agents at session start |
 | [`AGENTS.md`](AGENTS.md) | Agent rules file — loaded at the start of every coding session |
-| [`CHECKPOINT.md`](CHECKPOINT.md) | Full conversation state export — used to resume sessions with complete context |
+| [`CHECKPOINT.md`](CHECKPOINT.md) | Historical conversation state export — still useful, but superseded in part by the v1 constraints, ADRs, and progress ledger |
+
+---
+
+## Start Here
+
+Use this order when you need the current v1 truth instead of historical planning context:
+
+1. [`AGENTS.md`](AGENTS.md)
+2. [`.github/context/v1-constraints.md`](.github/context/v1-constraints.md)
+3. [`docs/decisions/ADR-001-single-user-v1-scope.md`](docs/decisions/ADR-001-single-user-v1-scope.md)
+4. [`docs/progress/00-current-status.md`](docs/progress/00-current-status.md)
+5. The relevant lesson in [`lessons/`](lessons/)
 
 ---
 
@@ -31,7 +47,7 @@ Each coding session follows a structured loop:
 3. **Plan** — `planning-and-task-breakdown` skill breaks work into ordered, verifiable increments
 4. **Implement** — `incremental-implementation` skill; TDD enforced via `test-driven-development` skill
 5. **Review** — `code-review-and-quality` skill checks correctness, readability, architecture, security, performance
-6. **Document** — `documentation-and-adrs` skill records decisions in `docs/plans/`
+6. **Document** — `documentation-and-adrs` skill records decisions in `docs/plans/`, `docs/decisions/`, and `docs/progress/`
 
 Skills are composable — a session may invoke several in sequence. The `using-agent-skills` skill governs how skills are discovered and chained.
 
@@ -65,8 +81,8 @@ Skills are composable — a session may invoke several in sequence. The `using-a
 | Backend API | .NET 10 Web API — Clean Architecture |
 | AI / OCR / Bot | Python FastAPI |
 | Frontend | Vue 3 + Vite + TypeScript |
-| Database | PostgreSQL 16 + EF Core |
-| Auth | JWT |
+| Database | PostgreSQL 18 + EF Core |
+| Auth | JWT (`userId` + `email` claims only in v1) |
 | File Storage | MiniStack (local) → Cloudflare R2 (VPS) → AWS S3 (future) |
 | Deployment | Docker Compose → VPS |
 

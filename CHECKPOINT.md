@@ -1,6 +1,8 @@
 # Project Checkpoint — Recipe Cost Management App
 > Saved: April 9, 2026  
 > Purpose: Full conversation state export. Use this file to resume the project in a new conversation with complete context.
+> 
+> **Update (April 17, 2026):** This file is now a historical snapshot. For the current v1 implementation scope, read `AGENTS.md`, `.github/context/v1-constraints.md`, `docs/decisions/ADR-001-single-user-v1-scope.md`, and `docs/progress/00-current-status.md` first.
 
 ---
 
@@ -8,7 +10,7 @@
 
 Paste this into a new conversation:
 
-> "I am resuming a project from a saved checkpoint. The file is at `nastart-evaluations/CHECKPOINT.md`. Please read it fully before anything else — it contains all decisions, personas, business flows, architecture, and the current build plan. Ask me nothing until you have confirmed you have read and understood the full checkpoint."
+> "I am resuming a project from a saved checkpoint. The file is at `nastart-agent-process/CHECKPOINT.md`. Please read it fully before anything else — then cross-check it against `AGENTS.md`, `.github/context/v1-constraints.md`, `docs/decisions/ADR-001-single-user-v1-scope.md`, and `docs/progress/00-current-status.md` before making implementation decisions. Ask me nothing until you have confirmed you have read and understood the full checkpoint and the current v1 constraints."
 
 ---
 
@@ -36,11 +38,11 @@ A **recipe costing app for solopreneurs** — home bakers, small food entreprene
 | Frontend | Vue.js (Vite + TypeScript) |
 | Main Backend API | .NET 10 Web API (C#) |
 | AI / OCR / Bot Service | Python FastAPI |
-| Database | PostgreSQL |
+| Database | PostgreSQL 18 |
 | File Storage | MiniStack (local dev) → Cloudflare R2 (VPS) → AWS S3 (future) — all S3-compatible, swap via `AWS_ENDPOINT_URL` |
 | Bot Framework | python-telegram-bot |
 | Deployment | Docker Compose → VPS |
-| Auth | JWT tokens, role-based |
+| Auth | JWT tokens with `userId` + `email` claims only in v1 |
 
 **Why dual-service backend:** .NET 10 handles all business logic, auth, and data. Python FastAPI handles all AI/OCR/LLM/Telegram concerns as an isolated microservice. This separation is intentional and locked.
 
@@ -67,15 +69,15 @@ Role stripping is **server-side only**. Vue.js never receives `food_cost_pct` or
 ## 4. Build Plan — 5 Phases
 
 ### Phase 1 — Foundation (Weeks 1–3)
-- PostgreSQL schema: `Company`, `Outlet`, `User`, `Ingredient`, `Unit`, `Category`
-- .NET 10 API: JWT auth, role-based access, CRUD for ingredients + outlets
+- PostgreSQL schema: `User`, `Ingredient`, `IngredientPriceHistory`, `Unit`, `Category`, `TelegramLink`
+- .NET 10 API: JWT auth, authenticated-user access, ingredient CRUD foundations
 - Vue.js: login screen, ingredient management page
-- **Checkpoint**: Log in as two different roles, create an ingredient, assign it to an outlet
+- **Checkpoint**: Register, verify, log in, then create and price an ingredient in a user-scoped library
 
 ### Phase 2 — Recipe Costing Engine (Weeks 4–7)
 - .NET 10: `Recipe`, `RecipeItem`, cost-per-portion calculation with unit normalization
-- Multi-outlet: recipes and ingredients scoped to outlet
-- Vue.js: recipe builder UI with live cost display, food cost % badges, cost threshold indicators
+- Single-user scope: recipes and ingredients belong directly to the authenticated user
+- Vue.js: recipe builder UI with live cost display, derived sell price, and packaging or target margin inputs
 - **Checkpoint**: Build a 5-ingredient recipe, change one ingredient price, watch cost-per-portion update live
 
 ### Phase 3 — AI Invoice Scanning (Weeks 8–11)
@@ -88,9 +90,9 @@ Role stripping is **server-side only**. Vue.js never receives `food_cost_pct` or
 ### Phase 4 — Telegram Bot (Weeks 12–15)
 - `python-telegram-bot` calling Python FastAPI
 - Commands: `/cost [dish]`, `/ingredients [name]`, `/summary`, `/alerts`, `/link XXXX`
-- Role-based responses (Owner sees margins, Chef sees cost only)
+- Personal responses for the single linked user (no role filtering in v1)
 - LLM natural language fallback for free-text queries
-- **Checkpoint**: Send a natural language Telegram message, receive correct role-filtered cost
+- **Checkpoint**: Send a natural language Telegram message, receive the correct personal cost summary
 
 ### Phase 5 — Portfolio Polish & Deploy (Weeks 16–20)
 - Docker Compose wiring all 4 services
@@ -127,6 +129,8 @@ nastart/
 ---
 
 ## 6. Canonical Design Decisions (14 — all locked, do not deviate)
+
+> **v1 applicability note (April 17, 2026):** For the current single-user build, C-1 through C-7, C-13, and C-14 remain active. C-8 through C-12 are preserved below as historical v2 reference and are superseded for v1 by `.github/context/v1-constraints.md` and `docs/decisions/ADR-001-single-user-v1-scope.md`.
 
 ### C-1 — Cascade Service Interface
 `ICostCascadeService.RecalculateForIngredient(ingredientId)` — no price parameter. Service fetches current price internally.
@@ -205,9 +209,9 @@ Exactly `'Manual'` or `'InvoiceScan'` (case-sensitive).
 
 ## 7. Key Design Decisions (from interviews)
 
-- **Recipe scope**: Each recipe belongs to ONE outlet only — no sharing across outlets
+- **Recipe scope**: In v1, each recipe belongs to ONE user directly. Outlet scoping is parked for v2.
 - **Telegram linking**: User generates a code in the web app → sends `/link XXXX` to the bot
-- **Invoice scanning access**: Owner and Procurement ONLY (enforced at both UI and API layers)
+- **Invoice scanning access**: The single authenticated user owns the full OCR review and commit flow in v1
 - **Ingredient price history**: Full history with timestamps — NEVER overwrite, always append
 - **Portfolio "done" definition**: Live deployed app + clean GitHub repo + Loom demo video
 - **Real users in v1**: No — dummy data and self-testing only
@@ -218,7 +222,9 @@ Exactly `'Manual'` or `'InvoiceScan'` (case-sensitive).
 
 ## 8. Business Flow Files (all validated)
 
-All flows are saved in `nastart-evaluations/business-flows/`. Full step-by-step tables with actors, components, data in/out, decision points, and error cases.
+> **Scope note (April 17, 2026):** These flows remain valuable design history, but not every file is a current v1 implementation guide. Flow 01 is historical enterprise onboarding reference, and Flow 05 is historical except for the `/link` mechanics in Flow 1. Use `AGENTS.md`, `.github/context/v1-constraints.md`, and `docs/progress/00-current-status.md` when there is a conflict.
+
+All flows are saved in `nastart-agent-process/business-flows/`. Full step-by-step tables with actors, components, data in/out, decision points, and error cases.
 
 | File | Contents |
 |---|---|
@@ -228,7 +234,7 @@ All flows are saved in `nastart-evaluations/business-flows/`. Full step-by-step 
 | `02-ingredient-price-management.md` | Ingredient CRUD, manual price update, cascade algorithm, spike alerts |
 | `03-recipe-builder-costing-engine.md` | Recipe creation, auto-cascade, threshold alerts, versioning |
 | `04-invoice-scanning-review-commit.md` | OCR upload, review queue (approve/edit/reject), price commit, audit trail |
-| `05-telegram-bot-flows.md` | Account linking, `/cost`, LLM fallback, push alerts, `/summary` |
+| `05-telegram-bot-flows.md` | Historical Telegram reference; only the `/link` mechanics in Flow 1 remain actionable for v1 |
 
 These flows were validated by a Lead Architect Agent in a 3-round review. 13 defects were found and resolved before final acceptance.
 
@@ -236,7 +242,7 @@ These flows were validated by a Lead Architect Agent in a 3-round review. 13 def
 
 ## 9. Persona Files
 
-All personas saved in `nastart-evaluations/personas/`. Each file contains 10 user stories, 5 use cases, pain points, concerns, and a "day in the life" narrative.
+All personas saved in `nastart-agent-process/personas/`. Each file contains 10 user stories, 5 use cases, pain points, concerns, and a "day in the life" narrative.
 
 | File | Persona |
 |---|---|
@@ -288,7 +294,7 @@ These were raised during persona and planning sessions. Not in scope for the 5-p
 
 ## 11. Current Status
 
-**As of April 9, 2026:**
+**As of April 17, 2026:**
 
 | Deliverable | Status |
 |---|---|
@@ -300,24 +306,26 @@ These were raised during persona and planning sessions. Not in scope for the 5-p
 | Business flows (5 flows, multi-agent validated) | ✅ Complete — files in `business-flows/` |
 | Portfolio interview (goals, done definition) | ✅ Complete |
 | Ideation refinement | ✅ Complete — see `docs/ideas/recipe-cost-solopreneur.md` |
-| Code | ❌ Not started — Phase 1 ready to begin |
+| Lesson series (`L1`–`L8`) | ✅ Drafted — v1 amendments applied across `L2`–`L8` |
+| Documentation sync | ✅ Updated — see `docs/progress/00-current-status.md` |
+| Application code in this repo | ❌ Not present — this repo stores process and documentation artifacts |
 
-**Next action: Start Phase 1 — Foundation (solopreneur scope)**
-- Design PostgreSQL schema for: `User`, `Ingredient`, `IngredientPriceHistory`, `Unit`, `Category`, `Recipe`, `RecipeItem` (no Company, no Outlet, no Invitation, no OutletUser in v1)
-- Scaffold .NET 10 solution: `Nastart.API`, `Nastart.Application`, `Nastart.Infrastructure`
-- Set up Vue.js (Vite + TypeScript) frontend scaffold
-- Build: JWT auth (single user, no roles), ingredient CRUD, login screen, ingredient management page
+**Next action:** use `docs/progress/00-current-status.md` as the working lesson ledger, then continue cleaning the lesson bodies that still preserve enterprise or authoring residue (`L3`, `L5`, `L6`, `L7`, `L8`).
 
 ---
 
 ## 12. File Map of This Project
 
 ```
-nastart-evaluations/
+nastart-agent-process/
 ├── CHECKPOINT.md                         ← THIS FILE — full conversation state
 ├── docs/
+│   ├── decisions/
+│   │   └── ADR-001-single-user-v1-scope.md ← Current v1 scope decision
 │   └── ideas/
 │       └── recipe-cost-solopreneur.md    ← Ideation one-pager (April 9)
+│   └── progress/
+│       └── 00-current-status.md           ← Lesson and documentation status ledger
 ├── personas/
 │   ├── 00-index.md                       ← Persona index + cross-persona themes
 │   ├── 01-fnb-owner.md

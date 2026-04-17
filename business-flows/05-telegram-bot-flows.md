@@ -1,9 +1,11 @@
 # Flow 05 — Telegram Bot Interactions
 
-> **Status:** ACCEPTED (Round 2, after defect corrections) — Lead Architect validated
+> **Status:** HISTORICAL REFERENCE (Accepted in Round 2 for the earlier enterprise design)
 > **Service owner:** Python FastAPI + .NET 10 Web API (data/auth authority)
 > **Bot framework:** python-telegram-bot
 > **Rule:** Bot is READ-ONLY and ALERT-ONLY. No data can be created or modified via Telegram.
+>
+> **Update (April 17, 2026):** The `TelegramLink` schema and `/link` mechanics remain relevant, but role-filtered responses, outlet-scoped recipient resolution, and role-based alert routing are v2-only. In v1, Telegram interactions resolve directly from confirmed `TelegramLink` records to the single authenticated `UserId`. Treat **Flow 1** as the still-relevant part of this file; treat **Flows 2 through 5** as historical enterprise reference only.
 
 ---
 
@@ -45,10 +47,12 @@ All Telegram identity is on `TelegramLink` only.
 | | | | | | | Already confirmed (409) → send "Already linked" | - |
 | | | | | | | telegramUserId already on another user's TelegramLink → 409 | Bot sends conflict message |
 | 10 | .NET 10 API | Updates TelegramLink | PostgreSQL | TelegramLink.id | status='confirmed', telegramUserId=telegram_user_id, telegramUsername, linkedAt=NOW() | - | DB error → 500 |
-| 11 | Python FastAPI | Sends confirmation message to user | Telegram Bot API | telegramUserId | "✓ Linked as [Name] — Role: [Role] at [Outlet]" | Delivery failure → log (link already committed; do not rollback) | - |
+| 11 | Python FastAPI | Sends confirmation message to user | Telegram Bot API | telegramUserId | "✓ Linked to your account as [Name]" | Delivery failure → log (link already committed; do not rollback) | - |
 | 12 | Vue.js | Detects confirmed state (SSE/polling) | Vue.js → .NET 10 | User.id | TelegramLink.status='confirmed' | - | Timeout after 15min → prompt re-generate |
 
 ---
+
+> **Historical note:** Flows 2 through 5 below are preserved for the earlier enterprise, multi-role design. Do not implement their outlet, role, or recipient-routing logic for v1.
 
 ## Flow 2: `/cost [dish name]`
 
