@@ -208,6 +208,7 @@ The connection string is split across two files. `appsettings.json` contains a s
 # Infrastructure needs EF Core + Npgsql (PostgreSQL provider)
 dotnet add src/Nastart.Infrastructure package Microsoft.EntityFrameworkCore
 dotnet add src/Nastart.Infrastructure package Npgsql.EntityFrameworkCore.PostgreSQL
+dotnet add src/Nastart.Infrastructure package EFCore.NamingConventions
 
 # API needs the EF Core design-time tools for migrations
 dotnet add src/Nastart.API package Microsoft.EntityFrameworkCore.Design
@@ -215,6 +216,8 @@ dotnet add src/Nastart.API package Microsoft.EntityFrameworkCore.Design
 # Application needs EF Core for DbSet<T> reference in IAppDbContext
 dotnet add src/Nastart.Application package Microsoft.EntityFrameworkCore
 ```
+
+> `UseSnakeCaseNamingConvention()` comes from the `EFCore.NamingConventions` package. Without that package, the extension method will not compile.
 
 Install the EF Core CLI tool globally (if not already):
 
@@ -1200,6 +1203,7 @@ public static class DependencyInjection
                 npgsqlOptions => npgsqlOptions.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName)
             )
             // P0: Maps C# PascalCase to PostgreSQL snake_case for all table and column names.
+            // Provided by the EFCore.NamingConventions NuGet package installed above.
             // Without this, EF generates quoted "PascalCase" names that break raw SQL and
             // psql introspection. Must be set BEFORE the first migration is generated.
             .UseSnakeCaseNamingConvention()
