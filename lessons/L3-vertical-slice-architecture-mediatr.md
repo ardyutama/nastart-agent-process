@@ -5,16 +5,30 @@
 > - How MediatR dispatches requests to handlers without controllers knowing anything about them
 > - How to structure feature folders as vertical slices
 > - How to build your first Query slice and wire it to a Minimal API endpoint
+> - How to apply primary constructor syntax to MediatR handlers
+> - How v1 (user-scoped) differs from v2 (outlet-scoped) slice shapes
 
-> ⚠️ **v1 Solopreneur Amendments (April 9, 2026)**
+---
+
+**← Previous:** L2 — EF Core + PostgreSQL Schema  
+**→ Next:** L4 — Validation, Error Handling & ErrorOr  
+**→ Used in:** L6 (full ingredient CRUD slices), L7 (cascade command slice), L8 (recipe costing slices)
+
+---
+
+> ⚠️ **v1 Solopreneur Amendments**
 >
-> **Do NOT build these slices — v1 has no outlets:**
-> - `GetOutletsQuery` / `GetOutletsHandler` — entire folder `Application/Features/Outlets/Queries/GetOutlets/`
-> - `CreateOutletCommand` / `CreateOutletHandler` — entire folder `Application/Features/Outlets/Commands/CreateOutlet/`
-> - `OutletEndpoints.cs` — delete this file
-> - `app.MapOutletEndpoints()` call in `Program.cs` — remove this line
+> This lesson's teaching examples use outlet slices. **Outlets are v2-only — do not build them in v1.**  
+> Follow the structural pattern (folder layout, handler shape, endpoint registration) but apply it to the ingredient slice instead.
 >
-> **The first real vertical slice you'll build is `GetIngredients` in L6**, which is user-scoped (not outlet-scoped). If this lesson uses outlet slices as its teaching example, follow the structural pattern (folder layout, handler shape, endpoint registration) but implement the ingredient slice instead.
+> | v2-only artifact (teaching example) | v1 replacement / action |
+> |---|---|
+> | `GetOutletsQuery` / `GetOutletsHandler` — `Application/Features/Outlets/Queries/GetOutlets/` | Build `GetIngredientsQuery` / `GetIngredientsHandler` in L6 |
+> | `CreateOutletCommand` / `CreateOutletHandler` — `Application/Features/Outlets/Commands/CreateOutlet/` | Build `CreateIngredientCommand` / `CreateIngredientHandler` in L6 |
+> | `OutletEndpoints.cs` | Delete this file — do not create it |
+> | `app.MapOutletEndpoints()` in `Program.cs` | Remove this line |
+>
+> **The first real v1 vertical slice is `GetIngredients`, built in L6.** It is user-scoped (`userId` from JWT claims), not outlet-scoped.
 
 ---
 
@@ -28,16 +42,16 @@ CQRS splits every operation into two categories:
 | **Query** | Ask something | No — read-only | `GetIngredientsQuery`, `GetIngredientByIdQuery` |
 
 Why separate them?
-- Commands can have validation, side effects, and event triggers
-- Queries are simple reads — no side effects, safe to cache
-- Different scaling: reads are typically 10× more frequent than writes
-- Each slice is self-contained — one file per concern, no shared "service" class with 30 methods
+- Commands carry validation, side effects, and event triggers
+- Queries are pure reads — no side effects, safe to cache
+- Reads are typically 10× more frequent than writes; separating them enables independent scaling
+- Each slice is self-contained — one folder per feature, no shared "service" class with 30 methods
 
 ---
 
 ## 2. MediatR — The Dispatcher
 
-MediatR is a library that decouples "who sends a request" from "who handles it." Your API endpoint sends a request object into MediatR, and MediatR routes it to the correct handler — the endpoint never imports or knows about the handler class.
+MediatR decouples "who sends a request" from "who handles it." An API endpoint sends a request object into MediatR; MediatR routes it to the correct handler. The endpoint never imports or knows about the handler class.
 
 ```
 Endpoint → MediatR.Send(request) → Handler → Database → Response
@@ -71,11 +85,18 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Nastart.Application;
 
+/// <summary>
+/// Wires up all Application-layer services into the DI container.
+/// Call <see cref="AddApplication"/> from <c>Program.cs</c>.
+/// </summary>
 public static class DependencyInjection
 {
+    /// <summary>
+    /// Scans the Application assembly and registers every
+    /// <see cref="MediatR.IRequestHandler{TRequest,TResponse}"/> implementation with MediatR.
+    /// </summary>
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
-        // Scans the Application assembly and registers all IRequestHandler implementations
         services.AddMediatR(cfg =>
             cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
 
@@ -137,6 +158,8 @@ Each folder is a self-contained unit. When you open a feature folder, every file
 
 ## 5. Your First Query — GetOutlets
 
+> ⚠️ **v2-only — do not build in v1.** Outlet management is a v2 multi-outlet feature. The first real vertical slice you build in v1 is `GetIngredients` in L6.
+
 Let's build a complete query slice. This returns all outlets for a company.
 
 > **Note:** This lesson builds endpoints WITHOUT authentication. L5 will add JWT middleware and `RequireAuthorization()` to all endpoints. We separate concerns: first learn the CQRS pattern, then layer security on top.
@@ -184,25 +207,20 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Application.Features.Outlets.Queries.GetOutlets;
 
-public class GetOutletsHandler : IRequestHandler<GetOutletsQuery, List<GetOutletsResponse>>
+/// <summary>Handles <see cref="GetOutletsQuery"/> — returns all outlets for a company.</summary>
+// Constructor injection — MediatR resolves db from DI; primary constructor captures it as a field.
+public class GetOutletsHandler(IAppDbContext db) : IRequestHandler<GetOutletsQuery, List<GetOutletsResponse>>
 {
-    private readonly IAppDbContext _db;
-
-    // Constructor injection — MediatR resolves this from DI
-    public GetOutletsHandler(IAppDbContext db)
-    {
-        _db = db;
-    }
-
     public async Task<List<GetOutletsResponse>> Handle(
         GetOutletsQuery request, CancellationToken cancellationToken)
     {
         // Query filters outlets by CompanyId — each outlet belongs to one company
-        var outlets = await _db.Outlets
+        var outlets = await db.Outlets
             .AsNoTracking()
             .Where(o => o.CompanyId == request.CompanyId)
             .Select(o => new GetOutletsResponse(o.Id, o.Name, o.CreatedAt))
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
 
         return outlets;
     }
@@ -216,9 +234,9 @@ public class GetOutletsHandler : IRequestHandler<GetOutletsQuery, List<GetOutlet
 
 ---
 
-> ⚠️ **v2-only — do not build in v1.** Outlet management is introduced when the product expands to multi-outlet teams. Skip this slice entirely. The first real vertical slice you build is `GetIngredients` in L6.
-
 ## 6. Your First Command — CreateOutlet
+
+> ⚠️ **v2-only — do not build in v1.** Outlet management is a v2 multi-outlet feature. Use `CreateIngredientCommand` from L6 as the v1 equivalent.
 
 Now a write operation. Commands change state — they insert, update, or delete data.
 
@@ -239,6 +257,8 @@ namespace Nastart.Application.Features.Outlets.Commands.CreateOutlet;
 // Returns the created outlet's response data.
 public record CreateOutletCommand(string Name, Guid CompanyId) : IRequest<CreateOutletResponse>;
 ```
+
+> **Note for v1 commands (see L4):** In v1, commands that can fail with business errors return `ErrorOr<TResponse>` instead of `TResponse` directly. This v2 teaching example uses the simpler form to focus on structure — L4 adds `ErrorOr<T>` to every command.
 
 ### The Response
 
@@ -261,15 +281,9 @@ using Nastart.Domain.Entities;
 
 namespace Nastart.Application.Features.Outlets.Commands.CreateOutlet;
 
-public class CreateOutletHandler : IRequestHandler<CreateOutletCommand, CreateOutletResponse>
+/// <summary>Handles <see cref="CreateOutletCommand"/> — creates a new outlet and returns its id and name.</summary>
+public class CreateOutletHandler(IAppDbContext db) : IRequestHandler<CreateOutletCommand, CreateOutletResponse>
 {
-    private readonly IAppDbContext _db;
-
-    public CreateOutletHandler(IAppDbContext db)
-    {
-        _db = db;
-    }
-
     public async Task<CreateOutletResponse> Handle(
         CreateOutletCommand command, CancellationToken cancellationToken)
     {
@@ -281,8 +295,8 @@ public class CreateOutletHandler : IRequestHandler<CreateOutletCommand, CreateOu
             CompanyId = command.CompanyId
         };
 
-        _db.Outlets.Add(outlet);
-        await _db.SaveChangesAsync(cancellationToken);
+        db.Outlets.Add(outlet);
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         // Return only what the caller needs — never the full entity
         return new CreateOutletResponse(outlet.Id, outlet.Name);
@@ -292,16 +306,14 @@ public class CreateOutletHandler : IRequestHandler<CreateOutletCommand, CreateOu
 
 ---
 
-> ⚠️ **v2-only — do not build in v1.**
-
 ## 7. Minimal API Endpoints — Thin Dispatchers
+
+> ⚠️ **v2-only — do not build in v1.** The `OutletEndpoints.cs` file below is the original multi-tenant teaching example. In v1 (single-user), skip this file entirely. The v1 endpoint is `IngredientEndpoints.cs` shown in section 9.
 
 Endpoints live in the API project. They do three things and nothing else:
 1. Parse the incoming HTTP request
 2. Send it to MediatR
 3. Return the result
-
-> ⚠️ **v2-only — do not build in v1.** The `OutletEndpoints.cs` file below is the original multi-tenant teaching example. In v1 (single-user), skip this file entirely. The v1 endpoint is `IngredientEndpoints.cs` shown in section 9.
 
 **File:** `src/Nastart.API/Endpoints/OutletEndpoints.cs`
 
@@ -365,7 +377,8 @@ app.Run();
 
 ## 8. How the Request Flows
 
-> *This flow uses the outlet example from section 7 (v2-only). The same flow applies identically to v1’s `POST /api/ingredients` — just substitute the command, handler, and DbSet.*
+> ⚠️ **v2-only — do not build in v1.** This flow diagram uses the outlet example. The same MediatR dispatch pattern applies identically to any v1 command — substitute command, handler, and DbSet accordingly.
+
 
 When `POST /api/outlets` is called, here's the journey:
 
@@ -403,6 +416,7 @@ using MediatR;
 
 namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
+/// <summary>Returns all ingredients belonging to the specified user.</summary>
 public record GetIngredientsQuery(Guid UserId) : IRequest<List<IngredientListResponse>>;
 ```
 
@@ -411,13 +425,19 @@ public record GetIngredientsQuery(Guid UserId) : IRequest<List<IngredientListRes
 ```csharp
 namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
+/// <summary>Projection of a single ingredient for list display.</summary>
+/// <remarks>
+/// Field names match the v1 Ingredient entity columns exactly.
+/// <c>CategoryName</c> and <c>PriceSpikeThreshold</c> are nullable because
+/// CategoryId is optional and PriceSpikeThreshold may not be set.
+/// </remarks>
 public record IngredientListResponse(
     Guid Id,
     string Name,
     string? CategoryName,
     string UnitAbbreviation,
     decimal UnitSize,
-    decimal PriceSpikeThresholdPct);
+    decimal? PriceSpikeThreshold);
 ```
 
 **File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsHandler.cs`
@@ -429,21 +449,18 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
-public class GetIngredientsHandler
+/// <summary>
+/// Handles <see cref="GetIngredientsQuery"/>.
+/// Returns all ingredients scoped to the requesting user.
+/// </summary>
+public class GetIngredientsHandler(IAppDbContext db)
     : IRequestHandler<GetIngredientsQuery, List<IngredientListResponse>>
 {
-    private readonly IAppDbContext _db;
-
-    public GetIngredientsHandler(IAppDbContext db)
-    {
-        _db = db;
-    }
-
     public async Task<List<IngredientListResponse>> Handle(
         GetIngredientsQuery request, CancellationToken cancellationToken)
     {
         // Ingredients are user-scoped — only return ingredients for this user
-        var ingredients = await _db.Ingredients
+        return await db.Ingredients
             .AsNoTracking()
             .Where(i => i.UserId == request.UserId)
             .Select(i => new IngredientListResponse(
@@ -452,13 +469,14 @@ public class GetIngredientsHandler
                 i.Category != null ? i.Category.Name : null,
                 i.Unit.Abbreviation,
                 i.UnitSize,
-                i.PriceSpikeThresholdPct))
-            .ToListAsync(cancellationToken);
-
-        return ingredients;
+                i.PriceSpikeThreshold))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
     }
 }
 ```
+
+> **Note:** This handler returns data directly. L4 introduces `ErrorOr<T>` for commands that can fail with business errors (e.g., duplicate ingredient names).
 
 **File:** `src/Nastart.API/Endpoints/IngredientEndpoints.cs`
 
@@ -479,7 +497,9 @@ public static class IngredientEndpoints
         // Will be protected with .RequireAuthorization() in L5
         group.MapGet("/", async (ISender sender, HttpContext httpContext, CancellationToken ct) =>
         {
-            var userId = httpContext.User.GetUserId();
+            // L3: hardcoded test userId — ClaimsPrincipalExtensions.GetUserId() is added in L5.
+            // Replace this line in L5 with: var userId = httpContext.User.GetUserId();
+            var userId = Guid.Parse("c0000000-0000-0000-0000-000000000001");
             var result = await sender.Send(new GetIngredientsQuery(userId), ct);
             return Results.Ok(result);
         });
@@ -498,7 +518,7 @@ app.MapIngredientEndpoints();
 
 ## 10. The Vertical Slice So Far
 
-After this lesson, your Application project looks like:
+### v1 build — what you actually create
 
 ```
 src/Nastart.Application/
@@ -509,17 +529,6 @@ src/Nastart.Application/
 │       └── IEmailService.cs
 ├── DependencyInjection.cs
 └── Features/
-    ├── Outlets/              ← v2-only: skip in v1
-    │   ├── Commands/
-    │   │   └── CreateOutlet/
-    │   │       ├── CreateOutletCommand.cs
-    │   │       ├── CreateOutletHandler.cs
-    │   │       └── CreateOutletResponse.cs
-    │   └── Queries/
-    │       └── GetOutlets/
-    │           ├── GetOutletsQuery.cs
-    │           ├── GetOutletsHandler.cs
-    │           └── GetOutletsResponse.cs
     └── Ingredients/
         └── Queries/
             └── GetIngredients/
@@ -528,15 +537,36 @@ src/Nastart.Application/
                 └── IngredientListResponse.cs
 ```
 
-Each feature is a vertical slice — everything needed for that operation is in one folder.
+The `Ingredients` slice is a placeholder built in this lesson to prove the pattern. Full CRUD is added in L6.
+
+### v2 reference — teaching examples in sections 5–8, do not build
+
+```
+src/Nastart.Application/
+└── Features/
+    └── Outlets/              ← v2-only: do not create this folder
+        ├── Commands/
+        │   └── CreateOutlet/
+        │       ├── CreateOutletCommand.cs
+        │       ├── CreateOutletHandler.cs
+        │       └── CreateOutletResponse.cs
+        └── Queries/
+            └── GetOutlets/
+                ├── GetOutletsQuery.cs
+                ├── GetOutletsHandler.cs
+                └── GetOutletsResponse.cs
+```
+
+Each feature is a vertical slice — everything needed for that operation lives in one folder. The outlet examples above illustrate the shape; the ingredients folder is the only slice you ship in v1.
 
 ---
 
 ## Checkpoint — Verify Before Moving to L4
 
 ```bash
-# 1. Solution builds
+# 1. Solution builds — confirms MediatR found all handlers at startup
 dotnet build
+# Expected: Build succeeded, 0 Error(s)
 
 # 2. Start the API
 dotnet run --project src/Nastart.API
@@ -545,15 +575,18 @@ dotnet run --project src/Nastart.API
 curl http://localhost:5000/health
 # Expected: {"status":"healthy"}
 
-# 4. Insert a test user directly (needed for user-scoped ingredient list)
+# 4. Insert a test user directly (v1 User columns: id, email, password_hash, is_email_verified, created_at, updated_at)
 docker exec -it $(docker compose ps -q postgres) psql -U dev -d recipe_cost_dev -c \
-  "INSERT INTO users (id, name, email, password_hash, is_verified, is_active, created_at) VALUES \
-  ('c0000000-0000-0000-0000-000000000001', 'Test User', 'test@example.com', 'placeholder', true, true, NOW());"
+  "INSERT INTO users (id, email, password_hash, is_email_verified, created_at, updated_at) VALUES \
+  ('c0000000-0000-0000-0000-000000000001', 'test@example.com', 'placeholder', false, NOW(), NOW());"
 
-# Checkpoint: v1 slice pattern works for GetIngredients
-curl -H "Authorization: Bearer $TOKEN" http://localhost:5000/api/ingredients
+# 5. Test the ingredients endpoint
+# Auth is added in L5. The endpoint currently uses a hardcoded test userId
+# (c0000000-0000-0000-0000-000000000001). Make sure the INSERT above ran first.
+curl http://localhost:5000/api/ingredients
 # Expected: 200 OK with an empty array []
-# This confirms: endpoint → ISender → GetIngredientsHandler → response
+# This confirms: endpoint → ISender → GetIngredientsHandler → DB → response
+# In L5: replace the hardcoded userId with httpContext.User.GetUserId() after JWT is configured.
 ```
 
 ### What you now understand
