@@ -309,7 +309,7 @@ public enum InvoiceStatus
 
 ---
 
-## 4. Domain Entities — All 11 for Phase 1
+## 4. Domain Entities — 9 v1 Entities (Phase 1)
 
 Each entity inherits from `BaseEntity` (created in L1). All live in `src/Nastart.Domain/Entities/`.
 
@@ -331,7 +331,7 @@ public class Company : BaseEntity
     public string Timezone { get; set; } = "UTC";
 
     // Navigation — a company has many outlets
-    public ICollection<Outlet> Outlets { get; set; } = new List<Outlet>();
+    public ICollection<Outlet> Outlets { get; set; } = [];
 }
 ```
 
@@ -355,8 +355,8 @@ public class Outlet : BaseEntity
     public Company Company { get; set; } = null!;
 
     // Navigation
-    public ICollection<OutletUser> OutletUsers { get; set; } = new List<OutletUser>();
-    public ICollection<Ingredient> Ingredients { get; set; } = new List<Ingredient>();
+    public ICollection<OutletUser> OutletUsers { get; set; } = [];
+    public ICollection<Ingredient> Ingredients { get; set; } = [];
 }
 ```
 
@@ -375,14 +375,16 @@ public class User : BaseEntity
 {
     public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    // MUST use a slow adaptive hashing algorithm — BCrypt (BCrypt.Net-Next) or ASP.NET Core
+    // PasswordHasher<T>. NEVER store plaintext or use fast hashes (MD5, SHA-*). See L5. (OWASP A02)
     public string PasswordHash { get; set; } = string.Empty;
     public bool IsVerified { get; set; }
     public bool IsActive { get; set; }
 
     // Navigation
     // v2-only: OutletUsers removed — no OutletUser entity in v1
-    public ICollection<TelegramLink> TelegramLinks { get; set; } = new List<TelegramLink>();
-    public ICollection<Ingredient> Ingredients { get; set; } = new List<Ingredient>();
+    public ICollection<TelegramLink> TelegramLinks { get; set; } = [];
+    public ICollection<Ingredient> Ingredients { get; set; } = [];
 }
 ```
 
@@ -460,7 +462,10 @@ public class TelegramLink : BaseEntity
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;
 
-    // SHA-256 hash of the one-time linking code — NEVER stores plaintext
+    // C-6: SHA-256 hash of the one-time linking code — NEVER stores plaintext.
+    // Raw code generation: use RandomNumberGenerator.GetBytes(32) — minimum 256-bit entropy.
+    // Encode as hex for the user-facing code, then SHA-256 hash for storage.
+    // At verification time use CryptographicOperations.FixedTimeEquals to prevent timing attacks.
     public string CodeHash { get; set; } = string.Empty;
 
     // 15-minute TTL from code generation
@@ -474,6 +479,18 @@ public class TelegramLink : BaseEntity
 
     // Set when status transitions to Confirmed
     public DateTimeOffset? LinkedAt { get; set; }
+
+    // Domain method — atomically confirms the link, enforcing C-6 state invariant.
+    // All four fields must be set together; no code path can set Status = Confirmed without them.
+    public void Confirm(long telegramUserId, string? telegramUsername)
+    {
+        if (Status != TelegramLinkStatus.Pending)
+            throw new InvalidOperationException("Only Pending links can be confirmed.");
+        TelegramUserId = telegramUserId;
+        TelegramUsername = telegramUsername;
+        LinkedAt = DateTimeOffset.UtcNow;
+        Status = TelegramLinkStatus.Confirmed;
+    }
 }
 ```
 
@@ -515,7 +532,7 @@ public class Category : BaseEntity
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;
 
-    public ICollection<Ingredient> Ingredients { get; set; } = new List<Ingredient>();
+    public ICollection<Ingredient> Ingredients { get; set; } = [];
 }
 ```
 
@@ -558,7 +575,7 @@ public class Ingredient : BaseEntity
 
     // User-scoped — an ingredient belongs to one user
     public Guid UserId { get; set; }
-    public User User { get; set; } = null!;;
+    public User User { get; set; } = null!;
 
     public Guid? CategoryId { get; set; }
     public Category? Category { get; set; }
@@ -567,6 +584,8 @@ public class Ingredient : BaseEntity
     public Unit Unit { get; set; } = null!;
 
     // The default purchase size for this ingredient (e.g., 1.0 for 1kg bag)
+    // Must be > 0 — it is a divisor in the cost formula (C-2). Enforce in L4 FluentValidation:
+    //   RuleFor(x => x.UnitSize).GreaterThan(0);
     public decimal UnitSize { get; set; }
 
     // Per-ingredient spike alert threshold.
@@ -575,7 +594,7 @@ public class Ingredient : BaseEntity
     public decimal? PriceSpikeThresholdPct { get; set; }
 
     // Navigation
-    public ICollection<IngredientPriceHistory> PriceHistory { get; set; } = new List<IngredientPriceHistory>();
+    public ICollection<IngredientPriceHistory> PriceHistory { get; set; } = [];
 }
 ```
 
@@ -591,28 +610,35 @@ using Nastart.Domain.Enums;
 
 // This is an APPEND-ONLY table. Records are NEVER updated or deleted.
 // Canonical Decision C-5: Cascade errors never roll back price history.
+// init setters enforce the append-only invariant at the C# level:
+// properties can be set during object construction but not mutated afterward.
+// EF Core 7+ supports init-only properties during materialization.
 public class IngredientPriceHistory : BaseEntity
 {
+    // EF Core needs a settable accessor on IngredientId / navigation for materialization.
     public Guid IngredientId { get; set; }
     public Ingredient Ingredient { get; set; } = null!;
 
-    public decimal Price { get; set; }
+    // C-5: init setters — these fields must never be mutated after creation.
+    public decimal Price { get; init; }
 
     // Snapshot of ingredient's unit_size at the time of recording
     // Allows historical cost calculation even if unit_size changes later
-    public decimal UnitSize { get; set; }
+    public decimal UnitSize { get; init; }
 
     // C-13: Exactly 'Manual' or 'InvoiceScan' (case-sensitive via enum string conversion)
-    public PriceSource Source { get; set; }
+    public PriceSource Source { get; init; }
 
     // C-4: System timestamp, set on insert. Non-editable. Used for ordering.
     // Current price is: ORDER BY CommittedAt DESC LIMIT 1
     // DateTimeOffset required: Npgsql maps timestamptz → DateTimeOffset (not DateTime)
-    public DateTimeOffset CommittedAt { get; set; }
+    // Set in the command handler: CommittedAt = DateTimeOffset.UtcNow
+    // HasDefaultValueSql("NOW()") in configuration is a DB-layer safety net only.
+    public DateTimeOffset CommittedAt { get; init; }
 
     // C-4: User-editable. Business effective date.
     // Defaults to invoice date (if from scan) or today (if manual).
-    public DateOnly EffectiveDate { get; set; }
+    public DateOnly EffectiveDate { get; init; }
 
     // Nullable FK — null for Manual entries, populated for InvoiceScan entries
     // Links back to the specific invoice line item that created this price
@@ -661,18 +687,15 @@ public class AppDbContext : DbContext, IAppDbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
-    // Each DbSet = one database table
+    // v1 Phase 1 entities — do NOT add Recipe, RecipeItem, CascadeErrorLog here.
+    // Those entity classes do not exist yet and will cause a compile error.
+    // Add them incrementally in L7 as a separate diff step.
     public DbSet<User> Users => Set<User>();
     public DbSet<TelegramLink> TelegramLinks => Set<TelegramLink>();
     public DbSet<Ingredient> Ingredients => Set<Ingredient>();
     public DbSet<IngredientPriceHistory> IngredientPriceHistories => Set<IngredientPriceHistory>();
     public DbSet<Unit> Units => Set<Unit>();
     public DbSet<Category> Categories => Set<Category>();
-    // Added in L7 — entities and configurations are defined in that lesson.
-    // Comment these out until you reach L7, or EF Core will fail to build the model.
-    public DbSet<Recipe> Recipes => Set<Recipe>();
-    public DbSet<RecipeItem> RecipeItems => Set<RecipeItem>();
-    public DbSet<CascadeErrorLog> CascadeErrorLogs => Set<CascadeErrorLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -680,22 +703,30 @@ public class AppDbContext : DbContext, IAppDbContext
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
     }
 
-    // Automatically set CreatedAt/UpdatedAt on save
-    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    // Automatically set CreatedAt/UpdatedAt on every save (sync and async paths).
+    // Private helper keeps the logic DRY across both overrides.
+    private void ApplyAuditTimestamps()
     {
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
-            switch (entry.State)
-            {
-                case EntityState.Added:
-                    entry.Entity.CreatedAt = DateTimeOffset.UtcNow;
-                    break;
-                case EntityState.Modified:
-                    entry.Entity.UpdatedAt = DateTimeOffset.UtcNow;
-                    break;
-            }
+            if (entry.State == EntityState.Added)
+                entry.Entity.CreatedAt = DateTimeOffset.UtcNow;
+            else if (entry.State == EntityState.Modified)
+                entry.Entity.UpdatedAt = DateTimeOffset.UtcNow;
         }
+    }
 
+    // Override both sync and async paths so audit timestamps are always set,
+    // regardless of whether the caller uses synchronous access (e.g. test seeders, migrations).
+    public override int SaveChanges()
+    {
+        ApplyAuditTimestamps();
+        return base.SaveChanges();
+    }
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        ApplyAuditTimestamps();
         return await base.SaveChangesAsync(cancellationToken);
     }
 }
@@ -703,7 +734,7 @@ public class AppDbContext : DbContext, IAppDbContext
 
 Now update `IAppDbContext` to include the DbSet properties:
 
-> ⚠️ **v2-only — omit enterprise DbSets above.** AppDbContext registers only the 9 entities below.
+> **Architectural trade-off:** `IAppDbContext` exposes `DbSet<T>` properties, which are EF Core-specific types. This requires adding the EF Core NuGet package to the `Application` layer — a pragmatic shortcut that couples Application to an infrastructure concern. The alternative is separate repository interfaces per entity (`IIngredientRepository`, etc.), which adds significant boilerplate for a single-user v1 app. The `IAppDbContext` pattern is widely used in the .NET community as a "thin abstraction" and is the right trade-off here. In v2, if test isolation becomes a priority, replace `DbSet<T>` with `IQueryable<T>` or full repository interfaces.
 
 **File:** `src/Nastart.Application/Common/Interfaces/IAppDbContext.cs`
 
@@ -715,16 +746,13 @@ namespace Nastart.Application.Common.Interfaces;
 
 public interface IAppDbContext
 {
+    // v1 Phase 1 entities. Add Recipe, RecipeItem, CascadeErrorLog in L7.
     DbSet<User> Users { get; }
     DbSet<TelegramLink> TelegramLinks { get; }
     DbSet<Ingredient> Ingredients { get; }
     DbSet<IngredientPriceHistory> IngredientPriceHistories { get; }
     DbSet<Unit> Units { get; }
     DbSet<Category> Categories { get; }
-    // Added in L7 — comment these out until you reach L7.
-    DbSet<Recipe> Recipes { get; }
-    DbSet<RecipeItem> RecipeItems { get; }
-    DbSet<CascadeErrorLog> CascadeErrorLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
@@ -961,10 +989,14 @@ public class TelegramLinkConfiguration : IEntityTypeConfiguration<TelegramLink>
         // C-6: Store enum as lowercase strings — 'pending' | 'confirmed' | 'unlinked'
         // Default HasConversion<string>() would store PascalCase ("Pending") which
         // violates the canonical decision contract. This converter normalizes to lowercase.
+        // Uses generic Enum.Parse<T> (.NET 6+) — type-safe and avoids boxing.
+        // Enum.TryParse with a fallback guards against unexpected values in the DB.
         builder.Property(t => t.Status)
             .HasConversion(
                 v => v.ToString().ToLowerInvariant(),
-                v => (TelegramLinkStatus)Enum.Parse(typeof(TelegramLinkStatus), v, ignoreCase: true))
+                v => Enum.TryParse<TelegramLinkStatus>(v, ignoreCase: true, out var result)
+                    ? result
+                    : TelegramLinkStatus.Pending) // safe fallback — logs should surface unexpected values
             .HasMaxLength(20);
 
         // Index for querying links by user and status (used in linking + deactivation flows)
@@ -1007,6 +1039,10 @@ public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
         // FluentValidation enforces these at the API boundary — the DB check is a
         // defence-in-depth guard against direct SQL inserts or migration seed errors.
         builder.HasCheckConstraint("ck_ingredient_unit_size_positive", "unit_size > 0");
+        // P1: Spike threshold must be between 0 and 100 (percent) when set.
+        builder.HasCheckConstraint(
+            "ck_ingredient_spike_threshold_range",
+            "price_spike_threshold_pct IS NULL OR (price_spike_threshold_pct >= 0 AND price_spike_threshold_pct <= 100)");
 
         builder.HasOne(i => i.User)
             .WithMany(u => u.Ingredients)
@@ -1061,8 +1097,16 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
 
         // C-13: Store enum as exact string — "Manual" or "InvoiceScan"
         builder.Property(p => p.Source).HasConversion<string>().HasMaxLength(20);
+        // C-13: Defense-in-depth DB CHECK — guards against direct SQL inserts bypassing EF Core.
+        builder.HasCheckConstraint(
+            "ck_ingredient_price_history_source",
+            "source IN ('Manual', 'InvoiceScan')");
 
         // C-4: System timestamp, set on insert. Used for current price ordering.
+        // The application handler MUST also set CommittedAt = DateTimeOffset.UtcNow on creation.
+        // HasDefaultValueSql is a DB-layer safety net for direct SQL inserts only.
+        // ⚠️ EF Core InMemory provider IGNORES HasDefaultValueSql. In unit tests using InMemory,
+        //    set CommittedAt explicitly in your test data — never rely on the SQL default in tests.
         builder.Property(p => p.CommittedAt).HasDefaultValueSql("NOW()");
 
         // Performance: composite index for "get the latest price" pattern
@@ -1096,6 +1140,33 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
         // Defense-in-depth: FluentValidation also enforces this at the API boundary.
         builder.HasCheckConstraint("ck_ingredient_price_history_price_positive", "price > 0");
         builder.HasCheckConstraint("ck_ingredient_price_history_unit_size_positive", "unit_size > 0");
+    }
+}
+```
+
+**File:** `src/Nastart.Infrastructure/Persistence/Configurations/UnitConfiguration.cs`
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Nastart.Domain.Entities;
+
+namespace Nastart.Infrastructure.Persistence.Configurations;
+
+// Unit is a shared system catalogue — no UserId.
+// Unique constraints prevent duplicate seed entries across CI runs.
+public class UnitConfiguration : IEntityTypeConfiguration<Unit>
+{
+    public void Configure(EntityTypeBuilder<Unit> builder)
+    {
+        builder.Property(u => u.Name).HasMaxLength(100).IsRequired();
+        builder.Property(u => u.Abbreviation).HasMaxLength(20).IsRequired();
+
+        // Uniqueness enforced at the DB level to support idempotent seed scripts.
+        builder.HasIndex(u => u.Name).IsUnique()
+            .HasDatabaseName("units_name_idx");
+        builder.HasIndex(u => u.Abbreviation).IsUnique()
+            .HasDatabaseName("units_abbreviation_idx");
     }
 }
 ```
@@ -1188,19 +1259,34 @@ Wire EF Core into the DI container. Create a clean extension method:
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Infrastructure.Persistence;
+using Nastart.Infrastructure.Services;
 
 namespace Nastart.Infrastructure;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IHostEnvironment environment)
     {
+        // Fail fast: surface a missing connection string at startup, not on the first request.
+        var connectionString = configuration.GetConnectionString("DefaultConnection")
+            ?? throw new InvalidOperationException(
+                "Connection string 'DefaultConnection' is missing. " +
+                "Add it to appsettings.Development.json (gitignored — never commit).");
+
         services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(
-                configuration.GetConnectionString("DefaultConnection"),
-                npgsqlOptions => npgsqlOptions.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName)
+                connectionString,
+                // Use .GetName().Name (short name) — NOT .FullName.
+                // .FullName includes version/culture/key tokens that break assembly lookup
+                // in single-file publish and Docker trimmed builds.
+                npgsqlOptions => npgsqlOptions.MigrationsAssembly(
+                    typeof(AppDbContext).Assembly.GetName().Name)
             )
             // P0: Maps C# PascalCase to PostgreSQL snake_case for all table and column names.
             // Provided by the EFCore.NamingConventions NuGet package installed above.
@@ -1213,6 +1299,15 @@ public static class DependencyInjection
         // Handlers ask for IAppDbContext — they receive AppDbContext
         services.AddScoped<IAppDbContext>(provider =>
             provider.GetRequiredService<AppDbContext>());
+
+        // ConsoleEmailService is for development only — emails are logged, never sent.
+        // In production, register a real provider (SMTP, SendGrid, etc.) here.
+        if (environment.IsDevelopment())
+            services.AddScoped<IEmailService, ConsoleEmailService>();
+        else
+            throw new InvalidOperationException(
+                "No production email provider is configured. " +
+                "Register a real IEmailService implementation for non-development environments.");
 
         return services;
     }
@@ -1229,10 +1324,13 @@ using Nastart.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
 
 // Register infrastructure services (EF Core, DbContext)
-builder.Services.AddInfrastructure(builder.Configuration);
+// Pass IHostEnvironment so DependencyInjection can conditionally register email service.
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
 
+// Note: this endpoint returns a static OK — it does NOT verify database connectivity.
+// Add AddHealthChecks().AddDbContextCheck<AppDbContext>() later for a real liveness probe.
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
 app.Run();
@@ -1255,7 +1353,7 @@ dotnet ef database update \
   --startup-project src/Nastart.API
 ```
 
-> **What just happened:** EF Core compared your entity classes + Fluent API configuration against the current database (empty). It generated a C# migration file that creates all 11 tables with columns, primary keys, foreign keys, indexes, and constraints. Then `database update` executed the generated SQL against your PostgreSQL.
+> **What just happened:** EF Core compared your entity classes + Fluent API configuration against the current database (empty). It generated a C# migration file that creates all **6 Phase 1 tables** (users, telegram_links, ingredients, ingredient_price_histories, units, categories) with columns, primary keys, foreign keys, indexes, and constraints. Recipe, RecipeItem, and CascadeErrorLog are added in L7. Then `database update` executed the generated SQL against your PostgreSQL.
 
 ### Verify the tables exist
 
@@ -1264,7 +1362,7 @@ dotnet ef database update \
 docker exec -it $(docker compose ps -q postgres) psql -U dev -d recipe_cost_dev -c "\dt"
 ```
 
-You should see tables for: users, telegram_links, ingredients, ingredient_price_histories, units, categories, recipes, recipe_items, cascade_error_logs.
+You should see tables for: users, telegram_links, ingredients, ingredient_price_histories, units, categories.
 
 ---
 
@@ -1292,7 +1390,8 @@ using Nastart.Application.Common.Interfaces;
 namespace Nastart.Infrastructure.Services;
 
 // Development-only email service — logs email content to console.
-// Replace with a real SMTP/SendGrid implementation for production.
+// Registered conditionally in DependencyInjection.cs (IsDevelopment() guard).
+// Production requires a real IEmailService implementation (SMTP, SendGrid, etc.).
 public class ConsoleEmailService : IEmailService
 {
     private readonly ILogger<ConsoleEmailService> _logger;
@@ -1315,8 +1414,8 @@ public class ConsoleEmailService : IEmailService
 Register it in `DependencyInjection.cs`:
 
 ```csharp
-// Add inside AddInfrastructure method, after AddDbContext
-services.AddScoped<IEmailService, ConsoleEmailService>();
+// Moved into DependencyInjection.cs — registered conditionally on IsDevelopment().
+// See the AddInfrastructure method above — do NOT register it separately.
 ```
 
 ---
@@ -1341,7 +1440,8 @@ dotnet ef database update \
 # 4. Tables exist in PostgreSQL
 #    Opens a psql shell inside the running container and runs "\dt" to list tables
 docker exec -it $(docker compose ps -q postgres) psql -U dev -d recipe_cost_dev -c "\dt"
-# Should show 9 tables (plus __EFMigrationsHistory)
+# Should show 6 tables (plus __EFMigrationsHistory)
+# Recipe, RecipeItem, CascadeErrorLog are added in L7
 
 # 5. API runs
 dotnet run --project src/Nastart.API
@@ -1351,12 +1451,12 @@ dotnet run --project src/Nastart.API
 ### What we built in this lesson
 
 - 5 enums (Role, TelegramLinkStatus, InvitationStatus, PriceSource, InvoiceStatus)
-- 9 entity classes in Domain/
-- 6 Fluent API configurations with constraints, indexes, and relationships
-- AppDbContext with automatic CreatedAt/UpdatedAt
-- IAppDbContext interface in Application
-- First migration creating all Phase 1 tables
-- ConsoleEmailService for dev email logging
+- 6 entity classes in Domain/ (Recipe, RecipeItem, CascadeErrorLog built in L7)
+- 7 Fluent API configurations with constraints, indexes, and relationships (added UnitConfiguration)
+- AppDbContext with automatic CreatedAt/UpdatedAt on both sync and async paths
+- IAppDbContext interface in Application (v1 entities only; L7 adds Recipe/RecipeItem/CascadeErrorLog)
+- First migration creating all 6 Phase 1 tables
+- ConsoleEmailService for dev email logging (guarded to development environment only)
 - docker-compose.yml for local PostgreSQL
 
 ### Entities deferred to later phases

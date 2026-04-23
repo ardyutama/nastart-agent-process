@@ -361,7 +361,12 @@ namespace Nastart.Domain.Common;
 
 public abstract class BaseEntity
 {
-    public Guid Id { get; set; } = Guid.CreateVersion7();
+    // init: ID is set at construction time and immutable afterward.
+    // Guid.CreateVersion7() generates time-ordered UUIDs \u2014 no B-tree page splits on INSERT.
+    public Guid Id { get; init; } = Guid.CreateVersion7();
+    // public set: AppDbContext.ApplyAuditTimestamps() (in Nastart.Infrastructure) assigns these.
+    // Cross-assembly write requires public access. Handlers must never assign these directly —
+    // that convention is enforced by code review, not by the language, in v1.
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
 }
