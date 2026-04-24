@@ -1,70 +1,65 @@
 # Lesson 5 — JWT Authentication & Authorization
 
+**← Previous:** L4 — Validation, Error Handling & the Result Pattern  
+**→ Next:** L6 — Ingredient Management: CRUD + Manual Price History  
+**→ Used in:** L6 (ingredient endpoints), L7 (cascade service), L8 (recipe endpoints)
+
+---
+
 > **What you'll learn:**
 > - How JWT (JSON Web Token) authentication works in .NET 10
 > - How to build Register and Login slices with password hashing
 > - How to issue JWTs with user identity claims (userId, email)
 > - How to protect endpoints with `RequireAuthorization()` for authenticated users
 >
-> **Out of scope for this lesson:**
-> - **Telegram bot-secret authentication** — deferred to Phase 4 (L15). The bot calls .NET API endpoints using a shared `X-Bot-Secret` header, not JWT. That service-to-service auth pattern is introduced when the Python bot is built, not here.
+> **Architectural Note — Bot Authentication:**
+>
+> Telegram bot-to-API calls use service-to-service authentication (a shared `X-Bot-Secret` header), **not JWT**. This pattern is introduced in Phase 4 (L15) when the Python bot is built. JWT in this lesson is for human user authentication only.
 
 > ⚠️ **v1 Solopreneur Amendments (April 9, 2026)**
 >
-> This lesson was originally written for multi-role, multi-outlet JWT auth. v1 is single-user with no roles. Apply these changes throughout:
+> This lesson teaches JWT token generation, password hashing, and protected endpoints. The core patterns (token structure, handler flow, validation pipeline) are identical between v1 and v2 — only claims, policies, and response shapes differ.
 >
-> **JWT claims — v1 contains ONLY:**
-> ```csharp
-> new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-> new Claim(ClaimTypes.Email, email)
-> // NO outletId claim — no outlets in v1
-> // NO role claim — no roles in v1
-> ```
+> **JWT claims — v1 contains only userId and email:**
 >
-> **ITokenService signature:**
-> ```csharp
-> // v1
-> public interface ITokenService
-> {
->     string GenerateToken(Guid userId, string email);
-> }
-> ```
+> | v2 pattern (teaching concept) | v1 replacement |
+> |---|---|
+> | `new Claim("outletId", outletId.ToString())` | Removed — no outlets in v1 |
+> | `new Claim(ClaimTypes.Role, role.ToString())` | Removed — no roles in v1 |
+> | `GenerateToken(userId, email, outletId, role)` | `GenerateToken(userId, email)` |
 >
-> **LoginResponse — simplified:**
-> ```csharp
-> // v1 — no outlet, no role returned
-> public record LoginResponse(string Token);
-> ```
+> **Authorization — v1 uses a single FallbackPolicy:**
 >
-> **LoginHandler — simplified:**
-> - Remove `OutletUser` query — no outlet lookup after login
-> - After email/password verification: `var token = _tokenService.GenerateToken(user.Id, user.Email);`
-> - Return `new LoginResponse(token)`
+> | v2 pattern (teaching concept) | v1 replacement |
+> |---|---|
+> | Named policies: `"OwnerOnly"`, `"OwnerOrChef"`, `"CanManageIngredients"` | All removed — not used in v1 |
+> | `.RequireAuthorization("OwnerOnly")` on endpoints | `.RequireAuthorization()` — no policy name needed |
+> | `options.AddPolicy("OwnerOnly", ...)` | Replaced by FallbackPolicy: `RequireAuthenticatedUser()` |
 >
-> **Authorization policies — replace all role-based policies:**
-> ```csharp
-> // v1 — single policy, all authenticated users have the same access
-> builder.Services.AddAuthorization(options =>
-> {
->     options.FallbackPolicy = new AuthorizationPolicyBuilder()
->         .RequireAuthenticatedUser()
->         .Build();
-> });
-> // All protected endpoints: .RequireAuthorization()
-> // Remove ALL: "OwnerOnly", "OwnerOrChef", "OwnerOrProcurement", "CanManageIngredients"
-> ```
+> **Claim helper extensions — v1 keeps only two methods:**
 >
-> **ClaimsPrincipalExtensions — keep only:**
-> ```csharp
-> public static Guid GetUserId(this ClaimsPrincipal user) { ... }
-> public static string GetEmail(this ClaimsPrincipal user) { ... }
-> // DELETE: GetOutletId(), GetRole()
-> ```
+> | v2 extension method | v1 action |
+> |---|---|
+> | `GetUserId(ClaimsPrincipal)` | ✅ Keep — used in all downstream endpoints |
+> | `GetEmail(ClaimsPrincipal)` | ✅ Keep — occasionally needed |
+> | `GetOutletId(ClaimsPrincipal)` | ❌ Remove — no outlet in JWT |
+> | `GetRole(ClaimsPrincipal)` | ❌ Remove — no role in JWT |
 >
-> **Do NOT build:**
-> - `CreateCompanyCommand` / company onboarding flow — no company in v1
-> - Any "setup" endpoint (`POST /api/setup`) — remove entirely
-> - The Role enum reference (`C-8`) — canonical decision C-8 is v2-only
+> **Login response — token only:**
+>
+> | v2 pattern | v1 replacement |
+> |---|---|
+> | `LoginResponse(Token, CompanyId, OutletId, Role)` | `LoginResponse(string Token)` |
+> | Re-issue JWT on company setup | Not applicable — one token, one user |
+>
+> **Do NOT build in v1:**
+> - `CreateCompanyCommand` / company onboarding (Section 12 — kept for reference, labeled v2-only)
+> - `POST /api/setup` or any company/outlet setup endpoints
+> - Role enum (canonical decision C-8 is v2-only)
+> - Role-based response stripping or dual DTOs (Section 10 — kept for reference, labeled v2-only)
+> - Named authorization policies
+>
+> **Note:** The code examples in Sections 1–8 are v1-ready. Sections 9, 10, and 12 are v2 reference material — skip them in v1 but review them to understand where the design is going.
 
 ---
 
@@ -281,25 +276,19 @@ using Nastart.Domain.Entities;
 
 namespace Nastart.Application.Features.Auth.Commands.Register;
 
-public class RegisterHandler : IRequestHandler<RegisterCommand, ErrorOr<RegisterResponse>>
+public class RegisterHandler(
+    IAppDbContext db,
+    IPasswordHasher hasher,
+    IEmailService email)
+    : IRequestHandler<RegisterCommand, ErrorOr<RegisterResponse>>
 {
-    private readonly IAppDbContext _db;
-    private readonly IPasswordHasher _hasher;
-    private readonly IEmailService _email;
-
-    public RegisterHandler(IAppDbContext db, IPasswordHasher hasher, IEmailService email)
-    {
-        _db = db;
-        _hasher = hasher;
-        _email = email;
-    }
-
     public async Task<ErrorOr<RegisterResponse>> Handle(
         RegisterCommand command, CancellationToken ct)
     {
         // Flow 01 Step 2: email uniqueness check
-        var emailTaken = await _db.Users
-            .AnyAsync(u => u.Email == command.Email.ToLowerInvariant(), ct);
+        var emailTaken = await db.Users
+            .AnyAsync(u => u.Email == command.Email.ToLowerInvariant(), ct)
+            .ConfigureAwait(false);
 
         if (emailTaken)
             return Error.Conflict("User.EmailTaken", "An account with this email already exists.");
@@ -310,13 +299,13 @@ public class RegisterHandler : IRequestHandler<RegisterCommand, ErrorOr<Register
             Id = Guid.NewGuid(),
             Name = command.Name,
             Email = command.Email.ToLowerInvariant(),
-            PasswordHash = _hasher.Hash(command.Password),
+            PasswordHash = hasher.Hash(command.Password),
             IsVerified = false,
             IsActive = false
         };
 
-        _db.Users.Add(user);
-        await _db.SaveChangesAsync(ct);
+        db.Users.Add(user);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // Flow 01 Step 4: send verification email
         // ConsoleEmailService logs to console in dev — real SMTP in production
@@ -326,10 +315,11 @@ public class RegisterHandler : IRequestHandler<RegisterCommand, ErrorOr<Register
 
         // In a real app, store the token hash for verification lookup
         // For Phase 1, we directly log it for manual testing
-        await _email.SendAsync(
+        await email.SendAsync(
             user.Email,
             "Verify your Nastart account",
-            $"Click here to verify: /api/auth/verify?token={verificationToken}&userId={user.Id}");
+            $"Click here to verify: /api/auth/verify?token={verificationToken}&userId={user.Id}")
+            .ConfigureAwait(false);
 
         return new RegisterResponse(user.Id, "Check your email to verify your account.");
     }
@@ -369,15 +359,9 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Infrastructure.Services;
 
-public class JwtTokenService : ITokenService
+// Primary constructor — config parameter is captured and accessible in GenerateToken
+public class JwtTokenService(IConfiguration config) : ITokenService
 {
-    private readonly IConfiguration _config;
-
-    public JwtTokenService(IConfiguration config)
-    {
-        _config = config;
-    }
-
     public string GenerateToken(Guid userId, string email)
     {
         var claims = new List<Claim>
@@ -388,7 +372,7 @@ public class JwtTokenService : ITokenService
         // Token expiry: set to 24 hours
         var expires = DateTime.UtcNow.AddHours(24);
 
-        var secret = _config["Jwt:SecretKey"]
+        var secret = config["Jwt:SecretKey"]
             ?? throw new InvalidOperationException(
                 "Jwt:SecretKey is not configured. Set it via user-secrets (dev) or " +
                 "Jwt__SecretKey environment variable (production).");
@@ -397,8 +381,8 @@ public class JwtTokenService : ITokenService
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
-            issuer: _config["Jwt:Issuer"],
-            audience: _config["Jwt:Audience"],
+            issuer: config["Jwt:Issuer"],
+            audience: config["Jwt:Audience"],
             claims: claims,
             expires: expires,
             signingCredentials: creds);
@@ -455,6 +439,10 @@ public class LoginCommandValidator : AbstractValidator<LoginCommand>
 
 **File:** `src/Nastart.Application/Features/Auth/Commands/Login/LoginHandler.cs`
 
+> **Security \u2014 Anti-Enumeration Pattern**
+>
+> The handler below returns the **same error code and message** (`Auth.InvalidCredentials` / `"Invalid email or password."`) for every failure path: user not found, wrong password, not verified, not active. This is intentional. Returning different messages per case (e.g., `"Email not found"` vs `"Wrong password"`) lets attackers probe which emails are registered and which accounts are active. Identical responses keep your user database private. Do not "fix" this by adding more specific error messages.
+
 ```csharp
 using ErrorOr;
 using MediatR;
@@ -463,31 +451,25 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Application.Features.Auth.Commands.Login;
 
-public class LoginHandler : IRequestHandler<LoginCommand, ErrorOr<LoginResponse>>
+public class LoginHandler(
+    IAppDbContext db,
+    IPasswordHasher hasher,
+    ITokenService tokenService)
+    : IRequestHandler<LoginCommand, ErrorOr<LoginResponse>>
 {
-    private readonly IAppDbContext _db;
-    private readonly IPasswordHasher _hasher;
-    private readonly ITokenService _tokenService;
-
-    public LoginHandler(IAppDbContext db, IPasswordHasher hasher, ITokenService tokenService)
-    {
-        _db = db;
-        _hasher = hasher;
-        _tokenService = tokenService;
-    }
-
     public async Task<ErrorOr<LoginResponse>> Handle(
         LoginCommand command, CancellationToken ct)
     {
         // Find user by email
-        var user = await _db.Users
-            .FirstOrDefaultAsync(u => u.Email == command.Email.ToLowerInvariant(), ct);
+        var user = await db.Users
+            .FirstOrDefaultAsync(u => u.Email == command.Email.ToLowerInvariant(), ct)
+            .ConfigureAwait(false);
 
         if (user is null)
             return Error.Unauthorized("Auth.InvalidCredentials", "Invalid email or password.");
 
         // Verify password
-        if (!_hasher.Verify(command.Password, user.PasswordHash))
+        if (!hasher.Verify(command.Password, user.PasswordHash))
             return Error.Unauthorized("Auth.InvalidCredentials", "Invalid email or password.");
 
         // flow 01 step 7 guard: must be verified AND active before issuing JWT
@@ -500,7 +482,7 @@ public class LoginHandler : IRequestHandler<LoginCommand, ErrorOr<LoginResponse>
         if (!user.IsActive)
             return Error.Unauthorized("Auth.InvalidCredentials", "Invalid email or password.");
 
-        var token = _tokenService.GenerateToken(user.Id, user.Email);
+        var token = tokenService.GenerateToken(user.Id, user.Email);
         return new LoginResponse(token);
     }
 }
@@ -531,7 +513,12 @@ public static class AuthEndpoints
         group.MapPost("/register", async (RegisterCommand command, ISender sender, CancellationToken ct) =>
         {
             var result = await sender.Send(command, ct);
-            return result.ToCreatedResult($"/api/users/{result.Value?.UserId}");
+
+            // Check error first — only access result.Value on the success path
+            if (result.IsError)
+                return result.ToApiResult();
+
+            return Results.Created($"/api/users/{result.Value!.UserId}", result.Value);
         });
 
         group.MapPost("/login", async (LoginCommand command, ISender sender, CancellationToken ct) =>
@@ -577,6 +564,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuerSigningKey = true,
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
+            ClockSkew = TimeSpan.Zero, // Enforce strict token expiry — disable default 5-minute clock skew
             IssuerSigningKey = new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(
                     builder.Configuration["Jwt:SecretKey"]
@@ -612,6 +600,8 @@ app.Run();
 
 Update existing endpoints to require authentication. Also add the helper to extract claims from the JWT:
 
+> **Replacing the L4 stub:** If you followed L4's prerequisite note and created a temporary stub `ClaimsPrincipalExtensions` class, **delete that stub now.** The file below is the real, production implementation with proper JWT claim extraction.
+
 **File:** `src/Nastart.API/Extensions/ClaimsPrincipalExtensions.cs`
 
 ```csharp
@@ -638,6 +628,14 @@ public static class ClaimsPrincipalExtensions
     // v2-only: GetRole() — removed in v1, no role claim in JWT
 }
 ```
+
+> **These two extensions are used throughout all downstream lessons:**
+>
+> - **L6** (Ingredient Management): every ingredient endpoint calls `httpContext.User.GetUserId()` to scope queries and commands to the authenticated user
+> - **L7** (Cost Cascade Service): the cascade handler extracts `UserId` for ownership checks
+> - **L8** (Recipe Builder): all recipe commands and queries are user-scoped via `GetUserId()`
+>
+> Keep `ClaimsPrincipalExtensions.cs` in place — it is a foundational dependency for every protected endpoint from here on.
 
 > ⚠️ **v2-only — do not build in v1.** The `OutletEndpoints.cs` code below is for reference only in Phase 2+. Outlets do not exist in the single-user v1 design. Do not create this file in v1.
 
@@ -716,7 +714,7 @@ group.MapPost("/price", async (...) => { ... })
 
 ---
 
-## 10. Role-Based Response Stripping (C-10)
+## 10. Role-Based Response Stripping (C-10) — v2-only, skip in v1
 
 > ⚠️ **v2-only — do not build in v1.** This pattern applies when multi-user roles are introduced in v2. In v1 (single user), there is one response DTO with full access — no role-based stripping needed.
 
@@ -781,6 +779,18 @@ public async Task<ErrorOr<object>> Handle(GetRecipeQuery query, CancellationToke
 
 Full email verification with token storage is a future improvement. For Phase 1, a simple verify endpoint that activates the user:
 
+> ⛔ **DEV-ONLY \u2014 Phase 1 Testing Shortcut**
+>
+> `VerifyEmailCommand` takes only `UserId` with **no token validation**. Anyone who knows a user's GUID can activate any account via this endpoint. This is intentional for local development where there is one user and the API is not publicly reachable.
+>
+> **Before deploying to a public URL:**
+> 1. Store `SHA-256(verificationToken)` on the `User` entity at registration time
+> 2. Change `VerifyEmailCommand` to accept both `UserId` and `Token`
+> 3. In the handler, compare `SHA-256(incomingToken)` against the stored hash
+> 4. Clear the hash after use (single-use token)
+>
+> The `RandomNumberGenerator.GetBytes(32)` generation in `RegisterHandler` is already correct — only the storage and lookup step is missing.
+
 ```bash
 mkdir -p src/Nastart.Application/Features/Auth/Commands/VerifyEmail
 ```
@@ -814,20 +824,15 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Application.Features.Auth.Commands.VerifyEmail;
 
-public class VerifyEmailHandler : IRequestHandler<VerifyEmailCommand, ErrorOr<VerifyEmailResponse>>
+public class VerifyEmailHandler(IAppDbContext db)
+    : IRequestHandler<VerifyEmailCommand, ErrorOr<VerifyEmailResponse>>
 {
-    private readonly IAppDbContext _db;
-
-    public VerifyEmailHandler(IAppDbContext db)
-    {
-        _db = db;
-    }
-
     public async Task<ErrorOr<VerifyEmailResponse>> Handle(
         VerifyEmailCommand command, CancellationToken ct)
     {
-        var user = await _db.Users
-            .FirstOrDefaultAsync(u => u.Id == command.UserId, ct);
+        var user = await db.Users
+            .FirstOrDefaultAsync(u => u.Id == command.UserId, ct)
+            .ConfigureAwait(false);
 
         if (user is null)
             return Error.NotFound("User.NotFound", "User not found.");
@@ -839,7 +844,7 @@ public class VerifyEmailHandler : IRequestHandler<VerifyEmailCommand, ErrorOr<Ve
         user.IsVerified = true;
         user.IsActive = true;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return new VerifyEmailResponse("Email verified. You can now log in.");
     }
@@ -859,7 +864,7 @@ group.MapPost("/verify", async (VerifyEmailCommand command, ISender sender, Canc
 
 ---
 
-## 12. Company + Outlet Onboarding (Post-Registration)
+## 12. Company + Outlet Onboarding (Post-Registration) — v2-only, skip in v1
 
 > ⚠️ **v2-only — do not build in v1.** No company or outlet onboarding in single-user design.
 
@@ -904,18 +909,10 @@ using Nastart.Domain.Enums;
 
 namespace Nastart.Application.Features.Companies.Commands.CreateCompany;
 
-public class CreateCompanyHandler
+// v2-only handler — primary constructor syntax applies even in reference code
+public class CreateCompanyHandler(IAppDbContext db, ITokenService tokenService)
     : IRequestHandler<CreateCompanyCommand, ErrorOr<CreateCompanyResponse>>
 {
-    private readonly IAppDbContext _db;
-    private readonly ITokenService _tokenService;
-
-    public CreateCompanyHandler(IAppDbContext db, ITokenService tokenService)
-    {
-        _db = db;
-        _tokenService = tokenService;
-    }
-
     public async Task<ErrorOr<CreateCompanyResponse>> Handle(
         CreateCompanyCommand command, CancellationToken ct)
     {
@@ -944,14 +941,14 @@ public class CreateCompanyHandler
             Role = Role.Owner
         };
 
-        _db.Companies.Add(company);
-        _db.Outlets.Add(outlet);
-        _db.OutletUsers.Add(outletUser);
-        await _db.SaveChangesAsync(ct);
+        db.Companies.Add(company);
+        db.Outlets.Add(outlet);
+        db.OutletUsers.Add(outletUser);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // Flow 01 Step 13: re-issue JWT with outlet scope
         // v2-only — this uses the v2 signature (userId, outletId, role); v1 signature is GenerateToken(userId, email)
-        var token = _tokenService.GenerateToken(command.UserId, outlet.Id, Role.Owner);
+        var token = tokenService.GenerateToken(command.UserId, outlet.Id, Role.Owner);
 
         return new CreateCompanyResponse(company.Id, outlet.Id, token);
     }

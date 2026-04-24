@@ -11,6 +11,20 @@
 > - **Async/deferred cascade** — Phase 4+. Currently cascade runs synchronously. Future: queue-based async with retries.
 > - **Telegram threshold alerts** — deferred to L15. CostCascadeService dispatches alerts; how the bot receives them is Phase 4.
 
+> **Prerequisites — L7 Decision A (UnitSizeSnapshot)**
+>
+> L7 commits **Decision A**: every `RecipeItem` carries a `UnitSizeSnapshot` column that captures
+> `Ingredient.UnitSize` at item-creation time. The C-2 cost formula uses this snapshot
+> (`item.UnitSizeSnapshot`) rather than the live `Ingredient.UnitSize`, so a package-size change
+> on an ingredient cannot silently reprice existing recipes.
+>
+> A DB check constraint enforces `unit_size_snapshot > 0`. Any handler in this lesson that
+> creates a `RecipeItem` **must** populate `UnitSizeSnapshot` from the ingredient's current
+> `UnitSize` at the time of creation. Three handlers are affected:
+> - `CreateRecipeHandler` — Section 3
+> - `AddRecipeItemHandler` — Section 6
+> - `CreateRecipeVersionHandler` (item copy) — Section 8
+
 > ⚠️ **v1 Solopreneur Amendments (April 9, 2026)**
 >
 > **Routes — no `{outletId}`:**
@@ -319,13 +333,15 @@ public class CreateRecipeHandler : IRequestHandler<CreateRecipeCommand, ErrorOr<
             return Error.Conflict("Recipe.Duplicate",
                 "A recipe with this name already exists.");
 
-        // Business rule: All ingredients must belong to this user
-        // C-1: Cascade service interface requires ingredients to be valid per user
+        // Business rule: All ingredients must belong to this user AND we need their UnitSize
+        // values to populate RecipeItem.UnitSizeSnapshot (L7 Decision A).
         var ingredientIds = command.RecipeItems.Select(r => r.IngredientId).Distinct().ToList();
-        var validCount = await _db.Ingredients
-            .CountAsync(i => i.UserId == command.UserId && ingredientIds.Contains(i.Id), ct);
+        var ingredientSizes = await _db.Ingredients
+            .Where(i => i.UserId == command.UserId && ingredientIds.Contains(i.Id))
+            .Select(i => new { i.Id, i.UnitSize })
+            .ToDictionaryAsync(i => i.Id, i => i.UnitSize, ct);
 
-        if (validCount != ingredientIds.Count)
+        if (ingredientSizes.Count != ingredientIds.Count)
             return Error.NotFound("Ingredient.NotFound",
                 "One or more ingredients do not belong to this user or do not exist.");
 
@@ -349,13 +365,17 @@ public class CreateRecipeHandler : IRequestHandler<CreateRecipeCommand, ErrorOr<
         _db.Recipes.Add(recipe);
 
         // Create all RecipeItems
+        // UnitSizeSnapshot: captured from ingredient.UnitSize at creation time (L7 Decision A).
+        // CostCascadeService uses this snapshot in the C-2 formula rather than the live
+        // Ingredient.UnitSize, preventing silent repricing if the package size changes later.
         var recipeItems = command.RecipeItems.Select(r => new RecipeItem
         {
             Id = Guid.NewGuid(),
             RecipeId = recipe.Id,
             IngredientId = r.IngredientId,
             Quantity = r.Quantity,
-            YieldPercentage = r.YieldPercentage
+            YieldPercentage = r.YieldPercentage,
+            UnitSizeSnapshot = ingredientSizes[r.IngredientId]  // Decision A
         }).ToList();
 
         foreach (var item in recipeItems)
@@ -756,13 +776,16 @@ public class AddRecipeItemHandler : IRequestHandler<AddRecipeItemCommand, ErrorO
                 "This ingredient is already in the recipe. Use UpdateRecipeItem to change quantity.");
 
         // Create and add RecipeItem
+        // UnitSizeSnapshot: ingredient entity already loaded above for access control —
+        // capture UnitSize now (L7 Decision A: snapshot prevents silent repricing on unit change)
         var recipeItem = new RecipeItem
         {
             Id = Guid.NewGuid(),
             RecipeId = command.RecipeId,
             IngredientId = command.IngredientId,
             Quantity = command.Quantity,
-            YieldPercentage = command.YieldPercentage
+            YieldPercentage = command.YieldPercentage,
+            UnitSizeSnapshot = ingredient.UnitSize    // Decision A
         };
 
         _db.RecipeItems.Add(recipeItem);
@@ -998,13 +1021,16 @@ public class CreateRecipeVersionHandler
         _db.Recipes.Add(newRecipe);
 
         // Copy all RecipeItems verbatim from source
+        // UnitSizeSnapshot: copy the snapshot from the source item — the unit size
+        // at item-creation time is preserved across versions (L7 Decision A).
         var copiedItems = sourceRecipe.RecipeItems.Select(ri => new RecipeItem
         {
             Id = Guid.NewGuid(),
             RecipeId = newRecipe.Id,
             IngredientId = ri.IngredientId,
             Quantity = ri.Quantity,
-            YieldPercentage = ri.YieldPercentage
+            YieldPercentage = ri.YieldPercentage,
+            UnitSizeSnapshot = ri.UnitSizeSnapshot  // Decision A: preserve snapshot from source item
         }).ToList();
 
         foreach (var item in copiedItems)

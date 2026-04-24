@@ -11,40 +11,42 @@
 > - **Python FastAPI alert implementation** — dispatching to actual Telegram bot is deferred to Phase 4 (L15). For now, we use a `ConsoleAlertDispatcher` stub that logs to console.
 > - **Async background cascade processing** — the cascade runs synchronously in v1. Advisory Note 4 from canonical decisions: plan async background processing for Phase 4+.
 
-> ⚠️ **v1 Solopreneur Amendments (April 9, 2026)**
+> **v1 scope notes (already integrated)**
 >
-> **Recipe entity** — use the corrected version below (not the one shown later in the lesson):
-> - Replace `Guid OutletId` + `Outlet Outlet` with `Guid UserId` + `User User`
-> - Remove `decimal? SellingPrice` — replaced by derived sell price
-> - Remove `decimal CostThresholdPercentage` — no per-recipe threshold in v1 (single user gets all alerts)
-> - Add `decimal PackagingCost` (default 0) and `decimal TargetMargin` (default 0)
+> This lesson is written for the **v1 single-user** scope. v2 artifacts (OutletId, CostThresholdPercentage, role-split alert payloads) are preserved as XML `<remarks>` and `// v2-only:` comments throughout so that future migration is straightforward. Nothing in this lesson needs to be "corrected" before use — the v1 design is the authoritative version.
 >
-> **IAlertDispatcher** — remove role-based recipient logic:
-> - Every alert targets the single user directly: `SendPriceSpikeAlertAsync(Guid userId, ...)`
-> - Remove `outletId` parameter from all alert methods — no outlets in v1
-> - No role-split alert payloads (C-11, C-12 are v2-only)
->
-> **CostCascadeService** — update alert dispatch calls:
-> ```csharp
-> // OLD: await _alertDispatcher.SendCostThresholdAlertAsync(recipe.Id, recipe.OutletId, ct);
-> // NEW:
-> await _alertDispatcher.SendPriceSpikeAlertAsync(recipe.UserId, ingredientId, oldPrice, newPrice, ct);
-> ```
+> | v2 concept | Where preserved |
+> |---|---|
+> | `CostThresholdPercentage` (per-Recipe C-9) | `Recipe` XML `<remarks>` + EF config comment |
+> | Role-split alert payloads (C-11, C-12) | `IAlertDispatcher` commented methods |
+> | `SendCostThresholdAlertAsync` | `IAlertDispatcher` + `ConsoleAlertDispatcher` commented stubs |
+> | `PriceSpikeThresholdPct` (per-Ingredient) | `IPriceSpikeChecker` remarks — v1 uses a 10% constant |
 
 ---
 
 ## 1. Why Cascade Logic Lives in Application, Not Infrastructure
 
 `ICostCascadeService` is **pure C# business logic** that only depends on `IAppDbContext` and `ILogger`. It contains no:
-- HTTP calls (those are in IAlertDispatcher)
+- HTTP calls (those are in `IAlertDispatcher`)
 - 3rd-party library integrations (those belong in Infrastructure)
 - Domain entity manipulation beyond simple property updates
 
 **Layer placement:**
-- **Interface**: `Application/Common/Interfaces/ICostCascadeService.cs`
-- **Implementation**: `Application/Services/CostCascadeService.cs`
 
-This keeps business logic portable and testable, separate from infrastructure concerns. Alert dispatching (which IS infrastructure-dependent) is injected as `IAlertDispatcher`, allowing us to swap implementations (stub → HTTP → message queue) without changing cascade logic.
+| Class / Interface | Layer | Reason |
+|---|---|---|
+| `ICostCascadeService` | Application — interface | Pure cost formula; no infrastructure deps |
+| `CostCascadeService` | Application — implementation | LINQ + EF Core In-Memory testable; no HTTP |
+| `IPriceSpikeChecker` | Application — interface | Spike detection logic; depends on IAppDbContext |
+| `PriceSpikeChecker` | Application — implementation | Reads price history, calls IAlertDispatcher |
+| `IAlertDispatcher` | Application — interface | Defines the notification contract |
+| `ConsoleAlertDispatcher` | **Infrastructure** — implementation | v1 stub; Phase 4 replaces with `HttpAlertDispatcher` |
+
+**SRP split — why `IPriceSpikeChecker` is separate from `ICostCascadeService`:**
+Spike detection is NOT part of the cost formula (C-2). Separating it means:
+- `CostCascadeService` can be tested without any alert dependency
+- The spike threshold logic (`DefaultSpikeThresholdPct`) is isolated and easy to replace in v2
+- `AddIngredientPriceHandler` composes both concerns sequentially, not the cascade service itself
 
 ---
 
@@ -61,42 +63,75 @@ namespace Nastart.Domain.Entities;
 
 using Nastart.Domain.Common;
 
-// C-9: CostThresholdPercentage is per-Recipe, not per-Outlet
-public class Recipe : BaseEntity
+/// <summary>
+/// Represents a costing recipe belonging to the authenticated user.
+/// </summary>
+/// <remarks>
+/// <para><b>v1:</b> Each recipe is scoped to a single <see cref="UserId"/> — no outlet scoping.
+/// <c>CostPerPortion</c> is server-authoritative, updated only by <c>ICostCascadeService</c>,
+/// and never accepted from the client.</para>
+/// <para>Sell price is derived at read time:
+/// <c>(CostPerPortion + PackagingCost) / (1 − TargetMargin)</c> — never stored.</para>
+/// <para><b>v2 (planned — C-9):</b> A <c>CostThresholdPercentage</c> field (per-<c>Recipe</c>,
+/// not per-<c>Outlet</c>) will enable recipe-level cost deviation alerts. Omitted in v1
+/// because a single user receives all spike alerts unconditionally via
+/// <c>IAlertDispatcher.SendPriceSpikeAlertAsync</c>.</para>
+/// </remarks>
+public sealed class Recipe : BaseEntity
 {
+    /// <summary>Display name of the recipe.</summary>
     public string Name { get; set; } = string.Empty;
 
-    // v1: User-scoped (not outlet-scoped). Single user owns all their recipes.
+    /// <summary>
+    /// ID of the user who owns this recipe.
+    /// v1: single authenticated user. v2: may be outlet-scoped.
+    /// </summary>
     public Guid UserId { get; set; }
+
+    /// <summary>Navigation property to the owning <see cref="User"/>.</summary>
     public User User { get; set; } = null!;
-    
+
+    /// <summary>Number of portions this recipe yields. Divisor in the C-2 cost formula.</summary>
     public int PortionCount { get; set; } = 1;
-    
-    // C-2: CostPerPortion = authoritative server calculation via CostCascadeService
+
+    /// <summary>
+    /// Server-authoritative cost per portion (4 dp precision).
+    /// Set only by <c>ICostCascadeService</c> — never accepted from the client.
+    /// </summary>
     public decimal CostPerPortion { get; set; }
-    
-    // v1 NEW: Flat packaging add-on per portion (e.g. $0.45 for box + label)
+
+    /// <summary>
+    /// Flat packaging cost added per portion (e.g. box + label).
+    /// Included in the derived sell price: <c>(CostPerPortion + PackagingCost) / (1 − TargetMargin)</c>.
+    /// </summary>
     public decimal PackagingCost { get; set; } = 0m;
-    
-    // v1 NEW: Target margin as decimal — e.g. 0.40 = 40% margin
-    // Sell price derived at read time: (CostPerPortion + PackagingCost) / (1 - TargetMargin)
+
+    /// <summary>
+    /// Target gross margin as a decimal (e.g. <c>0.40</c> = 40%).
+    /// Sell price derived at read time — never stored.
+    /// </summary>
     public decimal TargetMargin { get; set; } = 0m;
-    
-    // v1 REMOVED: SellingPrice (replaced by TargetMargin + derived sell price)
-    // v1 REMOVED: CostThresholdPercentage (no per-recipe threshold in v1 — single user gets all alerts)
-    
-    // Versioning — all versions of the "same recipe" share a VersionGroupId
+
+    // v2-only: CostThresholdPercentage (decimal) — C-9: per-recipe cost deviation threshold
+    // v2-only: SellingPrice (decimal)             — replaced by TargetMargin + derived sell price in v1
+
+    /// <summary>Groups all versions of the same recipe concept (e.g. Standard, Summer, Large Batch).</summary>
     public Guid VersionGroupId { get; set; }
+
+    /// <summary>Sequential version number within the <see cref="VersionGroupId"/> group.</summary>
     public int VersionNumber { get; set; } = 1;
+
+    /// <summary>Human-readable version label (e.g. "Standard", "Summer", "Large Batch").</summary>
     public string VersionLabel { get; set; } = "Standard";
-    
+
+    /// <summary>Ingredient line items that make up this recipe.</summary>
     public ICollection<RecipeItem> RecipeItems { get; set; } = new List<RecipeItem>();
 }
 ```
 
 ### Entity 2: RecipeItem
 
-Each `RecipeItem` is one ingredient line in a recipe. The `YieldPercentage` represents usable yield (e.g., 0.85 = 85% usable, 15% waste). The cost formula uses this to adjust final cost.
+Each `RecipeItem` is one ingredient line in a recipe. **Decision A is committed:** `UnitSizeSnapshot` stores the ingredient's `UnitSize` at item-creation time; the cascade service uses this snapshot in the C-2 formula rather than the live `Ingredient.UnitSize`. The `YieldPercentage` represents usable yield (e.g., 0.85 = 85% usable, 15% waste).
 
 **File:** `src/Nastart.Domain/Entities/RecipeItem.cs`
 
@@ -105,21 +140,50 @@ namespace Nastart.Domain.Entities;
 
 using Nastart.Domain.Common;
 
-// C-2 formula per item:
-// item_cost = (price / unitSize) * quantity * (1 / yieldPercentage)
-public class RecipeItem : BaseEntity
+/// <summary>
+/// Represents a single ingredient line in a <see cref="Recipe"/>.
+/// </summary>
+/// <remarks>
+/// <para><b>C-2 cost formula per item:</b>
+/// <c>item_cost = (price / UnitSizeSnapshot) × Quantity × (1 / YieldPercentage)</c></para>
+/// <para><b>Decision A (committed):</b> <see cref="UnitSizeSnapshot"/> stores the ingredient's
+/// <c>UnitSize</c> at item-creation time. The cascade service uses this snapshot rather than
+/// the live <c>Ingredient.UnitSize</c>, so a package-size change on the ingredient will NOT
+/// silently reprice existing recipe items. A new price entry must be committed to trigger the
+/// cascade and reprice.</para>
+/// </remarks>
+public sealed class RecipeItem : BaseEntity
 {
+    /// <summary>ID of the recipe this item belongs to.</summary>
     public Guid RecipeId { get; set; }
+
+    /// <summary>Navigation property to the parent <see cref="Recipe"/>.</summary>
     public Recipe Recipe { get; set; } = null!;
-    
+
+    /// <summary>ID of the ingredient used in this line item.</summary>
     public Guid IngredientId { get; set; }
+
+    /// <summary>Navigation property to the <see cref="Ingredient"/>.</summary>
     public Ingredient Ingredient { get; set; } = null!;
-    
-    // Amount of ingredient used per recipe (in ingredient's unit)
+
+    /// <summary>
+    /// Amount of the ingredient used per recipe batch (in the ingredient's own unit, e.g. kg, L).
+    /// </summary>
     public decimal Quantity { get; set; }
-    
-    // Yield percentage: 1.0 = 100% usable (no waste), 0.85 = 85% usable (15% waste)
+
+    /// <summary>
+    /// Usable yield as a decimal (e.g. <c>0.85</c> = 85% usable, 15% waste).
+    /// Applied as the divisor <c>1 / YieldPercentage</c> in the C-2 formula.
+    /// </summary>
     public decimal YieldPercentage { get; set; } = 1.0m;
+
+    /// <summary>
+    /// Snapshot of <c>Ingredient.UnitSize</c> captured at item-creation time (Decision A).
+    /// The C-2 formula uses this value rather than the live <c>Ingredient.UnitSize</c>,
+    /// preventing silent repricing when the ingredient's package size is later changed.
+    /// Must be greater than zero (enforced by a check constraint in the database).
+    /// </summary>
+    public decimal UnitSizeSnapshot { get; set; }
 }
 ```
 
@@ -134,13 +198,28 @@ namespace Nastart.Domain.Entities;
 
 using Nastart.Domain.Common;
 
-// C-5: Per-recipe cascade failures are logged here and skipped.
-// IngredientPriceHistory is append-only and NEVER rolled back on cascade failure.
-// BaseEntity.CreatedAt (inherited) serves as the error timestamp.
-public class CascadeErrorLog : BaseEntity
+/// <summary>
+/// Immutable audit record for per-recipe cascade failures.
+/// </summary>
+/// <remarks>
+/// <para><b>C-5:</b> When <c>ICostCascadeService</c> fails to recalculate a recipe's cost,
+/// the failure is recorded here and processing continues for remaining recipes.
+/// <c>IngredientPriceHistory</c> is append-only and is <b>never</b> rolled back on cascade
+/// failure.</para>
+/// <para>No FK constraints are placed on <see cref="IngredientId"/> or <see cref="RecipeId"/> —
+/// this is intentional (see <c>CascadeErrorLogConfiguration</c>). If an ingredient or recipe is
+/// subsequently deleted, this record must persist to preserve the incident history.</para>
+/// <para><c>BaseEntity.CreatedAt</c> (inherited) serves as the error timestamp.</para>
+/// </remarks>
+public sealed class CascadeErrorLog : BaseEntity
 {
+    /// <summary>ID of the ingredient whose price change triggered the failed cascade.</summary>
     public Guid IngredientId { get; set; }
+
+    /// <summary>ID of the recipe whose cost recalculation failed.</summary>
     public Guid RecipeId { get; set; }
+
+    /// <summary>Exception message captured at failure time. Max 2 000 characters.</summary>
     public string ErrorMessage { get; set; } = string.Empty;
 }
 ```
@@ -186,29 +265,43 @@ using Nastart.Domain.Entities;
 
 namespace Nastart.Infrastructure.Data.Configurations;
 
-public class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
+/// <summary>
+/// EF Core Fluent API configuration for the <see cref="Recipe"/> entity.
+/// </summary>
+/// <remarks>
+/// Monetary precision is set to 18,4 for cost fields and 5,4 for ratio fields
+/// to match the C-2 formula's 4 dp accuracy.
+/// v2-only fields are preserved as comments below to guide the v2 migration addition.
+/// </remarks>
+public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
 {
+    /// <inheritdoc/>
     public void Configure(EntityTypeBuilder<Recipe> entity)
     {
         entity.HasKey(r => r.Id);
-        
+
         entity.Property(r => r.Name)
             .IsRequired()
             .HasMaxLength(200);
-        
+
         // Name must be unique per user
         entity.HasIndex(r => new { r.UserId, r.Name })
             .IsUnique()
             .HasDatabaseName("ix_recipes_user_id_name");
-        
+
         entity.Property(r => r.CostPerPortion)
             .HasPrecision(18, 4);
-        
-        // v2-only: SellingPrice removed in v1 — sell price is derived at read time
-        // v2-only: CostThresholdPercentage removed in v1 — single user sees all alerts
-        
-        entity.Property(r => r.PackagingCost).HasPrecision(10, 4).HasDefaultValue(0);
-        entity.Property(r => r.TargetMargin).HasPrecision(5, 4).HasDefaultValue(0);
+
+        // v2-only: SellingPrice              — decimal(18,4); sell price is derived at read time in v1
+        // v2-only: CostThresholdPercentage   — decimal(5,4); C-9: per-recipe deviation threshold
+
+        entity.Property(r => r.PackagingCost)
+            .HasPrecision(10, 4)
+            .HasDefaultValue(0m);
+
+        entity.Property(r => r.TargetMargin)
+            .HasPrecision(5, 4)
+            .HasDefaultValue(0m);
 
         // P0: Index for fetching the latest version in a recipe group (dashboard, cascade).
         // Query pattern: WHERE version_group_id = @id ORDER BY version_number DESC LIMIT 1
@@ -220,11 +313,14 @@ public class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
         // Query pattern: WHERE user_id = @id GROUP BY version_group_id
         entity.HasIndex(r => new { r.UserId, r.VersionGroupId })
             .HasDatabaseName("ix_recipes_user_version_group");
-        
-        // FK to user — cascade delete: deleting user deletes recipes
-        entity.HasOne(r => r.User).WithMany(u => u.Recipes).HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Cascade);
-        
-        // One recipe to many RecipeItems — cascade delete: deleting recipe deletes items
+
+        // FK to user — cascade delete: deleting the user deletes all their recipes
+        entity.HasOne(r => r.User)
+            .WithMany(u => u.Recipes)
+            .HasForeignKey(r => r.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // One recipe to many RecipeItems — cascade delete: deleting a recipe deletes its items
         entity.HasMany(r => r.RecipeItems)
             .WithOne(ri => ri.Recipe)
             .HasForeignKey(ri => ri.RecipeId)
@@ -244,47 +340,53 @@ using Nastart.Domain.Entities;
 
 namespace Nastart.Infrastructure.Data.Configurations;
 
-public class RecipeItemConfiguration : IEntityTypeConfiguration<RecipeItem>
+/// <summary>
+/// EF Core Fluent API configuration for the <see cref="RecipeItem"/> entity.
+/// </summary>
+/// <remarks>
+/// Decision A is committed: <c>UnitSizeSnapshot</c> is an active column with a positive-value
+/// check constraint. See inline Decision A/B commentary for the full rationale.
+/// </remarks>
+public sealed class RecipeItemConfiguration : IEntityTypeConfiguration<RecipeItem>
 {
+    /// <inheritdoc/>
     public void Configure(EntityTypeBuilder<RecipeItem> entity)
     {
         entity.HasKey(ri => ri.Id);
-        
+
         entity.Property(ri => ri.Quantity)
             .HasPrecision(18, 4);
-        
+
         // YieldPercentage supports up to 9.9999 (e.g., 0.85 = 85%)
         entity.Property(ri => ri.YieldPercentage)
             .HasPrecision(5, 4);
 
         // P0 — DESIGN DECISION: UnitSizeSnapshot
         // The C-2 cost formula is: (price / unit_size) * quantity * (1 / yield).
-        // unit_size is read from WHERE? If read from Ingredient.UnitSize (live), a user
-        // changing the ingredient from a 1 kg to a 500 g bag silently doubles all attached
-        // recipe costs retroactively — without any new price entry firing the cascade.
+        // unit_size source:
         //
-        // Decision A (recommended): Add UnitSizeSnapshot to RecipeItem.
-        //   Snapshot the ingredient's unit_size at item creation time.
+        // Decision A (chosen): UnitSizeSnapshot on RecipeItem.
+        //   Snapshot the ingredient's unit_size at item-creation time.
         //   CostCascadeService uses item.UnitSizeSnapshot in the formula, not Ingredient.UnitSize.
         //   Changing unit_size on an ingredient does NOT silently reprice existing recipe items.
-        //   Requires a new column below and handler changes (see L8).
+        //   A new price entry must be committed to trigger the cascade.
         //
-        // Decision B: Omit snapshot, treat unit_size change as a breaking edit.
+        // Decision B (not chosen): Omit snapshot; treat unit_size change as a breaking edit.
         //   Developer rule: changing Ingredient.UnitSize always requires a new price entry
-        //   (which fires the cascade and recalculates using the new unit_size).
-        //   Risk: if a user only changes unit_size without a new price, costs are silently wrong.
-        //
-        // *** CHOOSE BEFORE FIRST MIGRATION — cannot add this column without a migration after ***
-        //
-        // If choosing Decision A, add this to RecipeItem.cs:
-        //   public decimal UnitSizeSnapshot { get; set; }
-        //
-        // And uncomment this block:
-        // entity.Property(ri => ri.UnitSizeSnapshot)
-        //     .HasPrecision(10, 4);
-        // entity.HasCheckConstraint(
-        //     "ck_recipe_item_unit_size_snapshot_positive",
-        //     "unit_size_snapshot > 0");
+        //   (which fires the cascade and recalculates using the new live unit_size).
+        //   Risk: if a user only changes unit_size without a new price entry, costs are silently wrong.
+
+        // Decision A — active configuration:
+        entity.Property(ri => ri.UnitSizeSnapshot)
+            .HasPrecision(10, 4);
+
+        entity.HasCheckConstraint(
+            "ck_recipe_item_unit_size_snapshot_positive",
+            "unit_size_snapshot > 0");
+
+        // Decision B (not chosen): remove UnitSizeSnapshot from RecipeItem entity and this
+        // configuration; update CostCascadeService to use item.Ingredient.UnitSize and add
+        // .ThenInclude(ri => ri.Ingredient) back to the Recipes query in RecalculateRecipeAsync.
 
         // FK to ingredient — RESTRICT delete: cannot delete an ingredient used in recipes
         entity.HasOne(ri => ri.Ingredient)
@@ -292,7 +394,7 @@ public class RecipeItemConfiguration : IEntityTypeConfiguration<RecipeItem>
             .HasForeignKey(ri => ri.IngredientId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // P0: FK index — PostgreSQL does not auto-create indexes on FK columns.
+        // P0: FK index — PostgreSQL does not auto-create indexes on FK columns
         entity.HasIndex(ri => ri.IngredientId)
             .HasDatabaseName("ix_recipe_items_ingredient_id");
     }
@@ -310,21 +412,29 @@ using Nastart.Domain.Entities;
 
 namespace Nastart.Infrastructure.Data.Configurations;
 
-public class CascadeErrorLogConfiguration : IEntityTypeConfiguration<CascadeErrorLog>
+/// <summary>
+/// EF Core Fluent API configuration for the <see cref="CascadeErrorLog"/> entity.
+/// </summary>
+/// <remarks>
+/// <para><b>C-5:</b> No FK constraints are placed on <c>IngredientId</c> or <c>RecipeId</c>.
+/// <c>CascadeErrorLog</c> is an immutable audit record — if an ingredient or recipe is later
+/// deleted, this record must persist to preserve the incident history. Bare GUIDs retain the
+/// original IDs without referential integrity enforcement.</para>
+/// <para>Query performance is maintained via the indexes defined below.</para>
+/// </remarks>
+public sealed class CascadeErrorLogConfiguration : IEntityTypeConfiguration<CascadeErrorLog>
 {
+    /// <inheritdoc/>
     public void Configure(EntityTypeBuilder<CascadeErrorLog> entity)
     {
         entity.HasKey(c => c.Id);
-        
+
         entity.Property(c => c.ErrorMessage)
             .HasMaxLength(2000)
             .IsRequired();
 
         // C-5: Intentionally NO FK constraints on IngredientId or RecipeId.
-        // CascadeErrorLog is an immutable audit record. If an ingredient or recipe is
-        // later deleted, the error log must persist — it preserves the incident history.
-        // Bare GUIDs retain the original IDs without referential integrity enforcement.
-        // Query performance is maintained via indexes below.
+        // See XML docs on this class for full rationale.
 
         // Index for querying all errors for a specific ingredient
         entity.HasIndex(c => c.IngredientId)
@@ -363,19 +473,47 @@ dotnet ef database update \
 ```csharp
 namespace Nastart.Application.Common.Interfaces;
 
-// C-1: Single entry point for all cost recalculations.
-// Called by: AddIngredientPrice (manual), InvoiceScanCommit (Phase 3), CreateRecipe (L8).
-// Always fetches current price internally — never accepts a price parameter.
-// This is an Application-layer interface because it contains pure business logic,
-// not infrastructure concerns.
+/// <summary>
+/// Defines the single entry point for all recipe cost recalculations triggered by
+/// ingredient price changes.
+/// </summary>
+/// <remarks>
+/// <para><b>C-1:</b> This is the only code path that may update <c>Recipe.CostPerPortion</c>.
+/// The service always fetches the current price internally — a price value is never accepted
+/// as a parameter. Called by: <c>AddIngredientPriceHandler</c> (manual entry),
+/// <c>InvoiceScanCommitHandler</c> (Phase 3), and any structural mutation handler
+/// (quantity, yield, or portion-count changes on recipe items).</para>
+/// <para><b>C-3:</b> Current price is derived at cascade time from
+/// <c>IngredientPriceHistory ORDER BY committed_at DESC LIMIT 1</c> — never from a stored
+/// field on <c>Ingredient</c>.</para>
+/// <para><b>C-5:</b> Per-recipe cascade failures are written to <c>CascadeErrorLog</c> and
+/// processing continues. <c>IngredientPriceHistory</c> is never rolled back on cascade
+/// failure.</para>
+/// </remarks>
 public interface ICostCascadeService
 {
-    // Recalculates CostPerPortion for all recipes that use this ingredient.
-    // Returns: how many recipes were updated, how many failed.
-    Task<CascadeResult> RecalculateForIngredientAsync(Guid ingredientId, CancellationToken cancellationToken);
+    /// <summary>
+    /// Recalculates <c>CostPerPortion</c> for all recipes that use the specified ingredient,
+    /// using the ingredient's most recently committed price (C-3).
+    /// </summary>
+    /// <param name="ingredientId">The ID of the ingredient whose price has just changed.</param>
+    /// <param name="cancellationToken">Propagates notification that the operation should be cancelled.</param>
+    /// <returns>
+    /// A <see cref="CascadeResult"/> containing counts of successfully updated and failed recipes.
+    /// </returns>
+    Task<CascadeResult> RecalculateForIngredientAsync(
+        Guid ingredientId,
+        CancellationToken cancellationToken);
 }
 
-// Value object returned by the cascade
+/// <summary>
+/// Immutable result returned by <see cref="ICostCascadeService.RecalculateForIngredientAsync"/>.
+/// </summary>
+/// <param name="AffectedRecipes">Recipes whose <c>CostPerPortion</c> was successfully updated.</param>
+/// <param name="FailedRecipes">
+/// Recipes whose recalculation failed. Each failure is persisted to <c>CascadeErrorLog</c>
+/// (C-5); processing continued for all remaining recipes.
+/// </param>
 public record CascadeResult(int AffectedRecipes, int FailedRecipes);
 ```
 
@@ -385,62 +523,68 @@ public record CascadeResult(int AffectedRecipes, int FailedRecipes);
 
 **File:** `src/Nastart.Application/Services/CostCascadeService.cs`
 
-This is the heart of the cost engine. Read the inline comments carefully — each one ties back to canonical decisions.
+This is the heart of the cost engine. Key improvements from baseline:
+- **Primary constructor syntax** (C# 12) — explicit field storage removed
+- **`sealed`** — no inheritance needed; aids JIT devirtualization
+- **`IAlertDispatcher` removed** — alert dispatch is now `IPriceSpikeChecker`'s concern (SRP)
+- **`ConfigureAwait(false)`** on every async DB call
+- **`RecalculateRecipeAsync`** — renamed from the erroneous `RecalculateNastartAsync`
 
 ```csharp
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Domain.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace Nastart.Application.Services;
 
-public class CostCascadeService : ICostCascadeService
+/// <summary>
+/// Application-layer implementation of <see cref="ICostCascadeService"/>.
+/// Recalculates <c>CostPerPortion</c> for every recipe affected by an ingredient price change.
+/// </summary>
+/// <remarks>
+/// Contains pure C# business logic only — dependencies are limited to
+/// <see cref="IAppDbContext"/> and <see cref="ILogger{TCategoryName}"/>.
+/// No HTTP calls, no 3rd-party libraries, no infrastructure concerns.
+/// See canonical decisions C-1, C-2, C-3, C-5.
+/// </remarks>
+public sealed class CostCascadeService(
+    IAppDbContext db,
+    ILogger<CostCascadeService> logger) : ICostCascadeService
 {
-    private readonly IAppDbContext _db;
-    private readonly IAlertDispatcher _alertDispatcher;
-    private readonly ILogger<CostCascadeService> _logger;
-
-    public CostCascadeService(
-        IAppDbContext db,
-        IAlertDispatcher alertDispatcher,
-        ILogger<CostCascadeService> logger)
-    {
-        _db = db;
-        _alertDispatcher = alertDispatcher;
-        _logger = logger;
-    }
-
+    /// <inheritdoc/>
     public async Task<CascadeResult> RecalculateForIngredientAsync(
         Guid ingredientId,
         CancellationToken cancellationToken)
     {
-        // C-3: Current price is ALWAYS the most recent committed record
-        // AsNoTracking — read-only; this record is never modified
-        var currentPriceRecord = await _db.IngredientPriceHistories
+        // C-3: Current price is ALWAYS the most recent committed record.
+        // AsNoTracking — read-only; this record is never modified.
+        var currentPriceRecord = await db.IngredientPriceHistories
             .AsNoTracking()
             .Where(iph => iph.IngredientId == ingredientId)
             .OrderByDescending(iph => iph.CommittedAt)
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
 
         if (currentPriceRecord is null)
         {
-            _logger.LogWarning(
+            logger.LogWarning(
                 "Cascade skipped for ingredient {IngredientId}: no price history found",
                 ingredientId);
             return new CascadeResult(0, 0);
         }
 
-        // Fetch all recipes that use this ingredient — we need their IDs for filtering
-        var affectedRecipes = await _db.RecipeItems
+        // Fetch all distinct recipe IDs that reference this ingredient
+        var affectedRecipeIds = await db.RecipeItems
             .Where(ri => ri.IngredientId == ingredientId)
             .Select(ri => ri.RecipeId)
             .Distinct()
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
 
-        if (affectedRecipes.Count == 0)
+        if (affectedRecipeIds.Count == 0)
         {
-            _logger.LogInformation("No recipes use ingredient {IngredientId}", ingredientId);
+            logger.LogInformation("No recipes use ingredient {IngredientId}", ingredientId);
             return new CascadeResult(0, 0);
         }
 
@@ -448,25 +592,26 @@ public class CostCascadeService : ICostCascadeService
         int failCount = 0;
 
         // C-5: Per-recipe failure NEVER rolls back IngredientPriceHistory.
-        // Process each recipe independently. If one fails, log and continue.
-        foreach (var recipeId in affectedRecipes)
+        // Process each recipe independently; log and continue on failure.
+        foreach (var recipeId in affectedRecipeIds)
         {
             try
             {
-                await RecalculateNastartAsync(recipeId, cancellationToken);
+                await RecalculateRecipeAsync(recipeId, cancellationToken)
+                    .ConfigureAwait(false);
                 successCount++;
             }
             catch (Exception ex)
             {
                 failCount++;
-                _logger.LogError(
+                logger.LogError(
                     ex,
                     "Cascade failed for recipe {RecipeId} (triggered by ingredient {IngredientId})",
                     recipeId,
                     ingredientId);
 
-                // Log the error for auditing — do not let this block subsequent recipes
-                _db.CascadeErrorLogs.Add(new CascadeErrorLog
+                // C-5: Append an audit record — do not let a logging failure block other recipes
+                db.CascadeErrorLogs.Add(new CascadeErrorLog
                 {
                     Id = Guid.NewGuid(),
                     IngredientId = ingredientId,
@@ -476,11 +621,15 @@ public class CostCascadeService : ICostCascadeService
 
                 try
                 {
-                    await _db.SaveChangesAsync(cancellationToken);
+                    await db.SaveChangesAsync(cancellationToken)
+                        .ConfigureAwait(false);
                 }
                 catch (Exception logEx)
                 {
-                    _logger.LogError(logEx, "Failed to log cascade error for recipe {RecipeId}", recipeId);
+                    logger.LogError(
+                        logEx,
+                        "Failed to write CascadeErrorLog for recipe {RecipeId}",
+                        recipeId);
                 }
             }
         }
@@ -488,22 +637,29 @@ public class CostCascadeService : ICostCascadeService
         return new CascadeResult(successCount, failCount);
     }
 
-    private async Task RecalculateNastartAsync(Guid recipeId, CancellationToken cancellationToken)
+    // Recalculates CostPerPortion for a single recipe using the C-2 formula.
+    // Isolated into a private method so the caller can catch per-recipe exceptions
+    // without aborting the entire cascade run.
+    private async Task RecalculateRecipeAsync(Guid recipeId, CancellationToken cancellationToken)
     {
-        // Load the recipe with all its RecipeItems and each item's Ingredient (for unit conversion)
-        var recipe = await _db.Recipes
+        // Load the recipe and its items.
+        // Decision A: Ingredient is NOT included — item.UnitSizeSnapshot provides the unit
+        // size used in the C-2 formula, so the live Ingredient.UnitSize is not needed.
+        var recipe = await db.Recipes
             .Include(r => r.RecipeItems)
-                .ThenInclude(ri => ri.Ingredient)
             .FirstOrDefaultAsync(r => r.Id == recipeId, cancellationToken)
-            ?? throw new InvalidOperationException($"Recipe {recipeId} not found during cascade");
+            .ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"Recipe {recipeId} not found during cascade");
 
-        // Accumulate total cost across all recipe items
-        decimal totalCost = 0m;
+        // Batch-load the latest price for every ingredient in this recipe — avoids N+1.
+        // A single query fetches the most-recent price per ingredient ID.
+        var ingredientIds = recipe.RecipeItems
+            .Select(ri => ri.IngredientId)
+            .Distinct()
+            .ToList();
 
-        // Batch-load latest prices for ALL ingredients in this recipe — avoids N+1 queries.
-        // Without this, the foreach below would fire one DB query per recipe item.
-        var ingredientIds = recipe.RecipeItems.Select(ri => ri.IngredientId).Distinct().ToList();
-        var latestPrices = await _db.IngredientPriceHistories
+        var latestPrices = await db.IngredientPriceHistories
             .Where(iph => ingredientIds.Contains(iph.IngredientId))
             .GroupBy(iph => iph.IngredientId)
             .Select(g => new
@@ -511,166 +667,199 @@ public class CostCascadeService : ICostCascadeService
                 IngredientId = g.Key,
                 Price = g.OrderByDescending(iph => iph.CommittedAt).First().Price
             })
-            .ToDictionaryAsync(x => x.IngredientId, x => (decimal?)x.Price, cancellationToken);
+            .ToDictionaryAsync(x => x.IngredientId, x => (decimal?)x.Price, cancellationToken)
+            .ConfigureAwait(false);
 
-        // C-2 formula: for each item, calculate item_cost, then sum
+        decimal totalCost = 0m;
+
+        // C-2 formula: item_cost = (price / UnitSizeSnapshot) × Quantity × (1 / YieldPercentage)
+        //
+        // UnitSizeSnapshot was captured from Ingredient.UnitSize at item-creation time (Decision A).
+        // A package-size change on the ingredient does NOT silently reprice existing items —
+        // a new price entry must be committed to trigger a cascade.
+        //
+        // Example (100/10) × 2 × (1/0.85) = 23.5294 (rounded to 4dp):
+        //   price = 100, UnitSizeSnapshot = 10 kg, Quantity = 2 kg, YieldPercentage = 0.85
+        //
+        // Decision B (not chosen): replace item.UnitSizeSnapshot with item.Ingredient.UnitSize.
+        // Requires .ThenInclude(ri => ri.Ingredient) on the Include above and removes isolation.
         foreach (var item in recipe.RecipeItems)
         {
-            // C-3: Look up current price from pre-loaded batch (avoids N+1 — one query for all ingredients above)
-            latestPrices.TryGetValue(item.IngredientId, out var latestPrice);
-
-            if (latestPrice is null)
+            if (!latestPrices.TryGetValue(item.IngredientId, out var latestPrice)
+                || latestPrice is null)
             {
-                // No price history for this ingredient — it contributes 0 to the cost
-                _logger.LogWarning(
+                logger.LogWarning(
                     "Ingredient {IngredientId} in recipe {RecipeId} has no price history — skipping item cost",
                     item.IngredientId,
                     recipeId);
                 continue;
             }
 
-            // C-2 formula:
-            // item_cost = (price / unitSize) * quantity * (1 / yieldPercentage)
-            //
-            // P1 — UnitSize source depends on P0-a design decision:
-            //   Decision A (UnitSizeSnapshot on RecipeItem): use item.UnitSizeSnapshot
-            //     → Isolated: changing Ingredient.UnitSize does NOT silently reprice this item.
-            //   Decision B (no snapshot): use item.Ingredient.UnitSize (live value)
-            //     → Risk: changing Ingredient.UnitSize reprices all historical recipe items.
-            //
-            // If Decision A was chosen, replace item.Ingredient.UnitSize with item.UnitSizeSnapshot:
-            // var itemCost = (latestPrice.Value / item.UnitSizeSnapshot)
-            //              * item.Quantity
-            //              * (1m / item.YieldPercentage);
-            //
-            // Example with Decision B (current):
-            //   - price = 100 (per unit from IngredientPriceHistory)
-            //   - unitSize = 10 (kg — from Ingredient.UnitSize, live)
-            //   - quantity = 2 (kg — from RecipeItem)
-            //   - yieldPercentage = 0.85 (85% usable, 15% waste)
-            //   - item_cost = (100/10) * 2 * (1/0.85) = 10 * 2 * 1.176 = 23.53
-            var itemCost = (latestPrice.Value / item.Ingredient.UnitSize) 
-                * item.Quantity 
+            var itemCost = (latestPrice.Value / item.UnitSizeSnapshot)
+                * item.Quantity
                 * (1m / item.YieldPercentage);
 
             totalCost += itemCost;
         }
 
-        // C-2: cost_per_portion = total item costs / portion_count
-        var costPerPortion = recipe.PortionCount > 0
-            ? totalCost / recipe.PortionCount
+        // C-2: cost_per_portion = SUM(item costs) / portion_count
+        // Guard: PortionCount = 0 → clamp to 0 rather than throw DivideByZeroException
+        recipe.CostPerPortion = recipe.PortionCount > 0
+            ? Math.Round(totalCost / recipe.PortionCount, 4)
             : 0m;
 
-        // Round to 4 decimal places for database precision (matches DbPrecision)
-        recipe.CostPerPortion = Math.Round(costPerPortion, 4);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken)
+            .ConfigureAwait(false);
 
-        _logger.LogInformation(
+        logger.LogInformation(
             "Recipe {RecipeId} recalculated: cost_per_portion = {CostPerPortion}",
             recipeId,
             recipe.CostPerPortion);
 
         // v1: Sell price is derived at read time — (CostPerPortion + PackagingCost) / (1 - TargetMargin)
-        // No stored threshold to check in v1. Personal Telegram spike alerts dispatched below.
+        // No stored cost threshold in v1; spike alerts are dispatched by IPriceSpikeChecker
+        // in AddIngredientPriceHandler before cascade is called.
 
-        // P1 — HANDLER RULE: Cascade must be called on ALL cost-affecting mutations, not just price changes.
-        // The cascade service is triggered by price entries (the primary path), but cost also changes when:
-        //   - RecipeItem.Quantity changes
-        //   - RecipeItem.YieldPercentage changes
-        //   - Recipe.PortionCount changes
-        //   - A RecipeItem is added or removed
+        // P1 — HANDLER RULE: Call cascade on ALL cost-affecting mutations, not just price changes:
+        //   - RecipeItem.Quantity changes     - RecipeItem.YieldPercentage changes
+        //   - Recipe.PortionCount changes     - A RecipeItem is added or removed
         //
-        // In each structural mutation handler (UpdateRecipeItemQuantityHandler, etc.), call:
-        //
-        // var affectedIngredientIds = recipe.RecipeItems
-        //     .Select(ri => ri.IngredientId)
-        //     .Distinct()
-        //     .ToList();
-        // foreach (var ingredientId in affectedIngredientIds)
-        //     await _costCascadeService.RecalculateForIngredientAsync(ingredientId, ct);
-        //
-        // C-1: No price param — service re-reads latest price internally.
+        // In each structural mutation handler:
+        //   foreach (var iId in recipe.RecipeItems.Select(ri => ri.IngredientId).Distinct())
+        //       await _cascadeService.RecalculateForIngredientAsync(iId, ct);  // C-1: no price param
     }
 }
 ```
 
 ---
 
-## 9. Price Spike Detection
+## 9. Price Spike Detection — `IPriceSpikeChecker` + `PriceSpikeChecker`
 
-A static helper that compares new price to previous price and calculates % change.
+The original design used a `static` helper class — non-injectable and non-mockable. Refactored to an interface + injectable service so it can be tested in isolation and injected into the handler.
+
+**File:** `src/Nastart.Application/Common/Interfaces/IPriceSpikeChecker.cs`
+
+```csharp
+namespace Nastart.Application.Common.Interfaces;
+
+/// <summary>
+/// Detects ingredient price spikes and dispatches alerts to the authenticated user.
+/// </summary>
+/// <remarks>
+/// Called by <c>AddIngredientPriceHandler</c> immediately after a new
+/// <c>IngredientPriceHistory</c> record is committed, before the cascade runs.
+/// The alert does not block cascade execution.
+/// <para>
+/// <b>v1:</b> Uses a single hardcoded threshold constant
+/// (<c>DefaultSpikeThresholdPct = 10m</c>). Every price change ≥10% triggers an alert.
+/// <b>v2:</b> Replace the constant with <c>ingredient.PriceSpikeThresholdPct</c> for
+/// per-ingredient thresholds (C-11).
+/// </para>
+/// </remarks>
+public interface IPriceSpikeChecker
+{
+    /// <summary>
+    /// Compares <paramref name="newPrice"/> to the previous committed price and dispatches
+    /// a spike alert via <see cref="IAlertDispatcher"/> if the change exceeds the threshold.
+    /// </summary>
+    /// <param name="ingredientId">ID of the ingredient whose price just changed.</param>
+    /// <param name="userId">ID of the owning user (v1: single authenticated user).</param>
+    /// <param name="newPrice">The price that was just committed.</param>
+    /// <param name="cancellationToken">Propagates notification that the operation should be cancelled.</param>
+    Task CheckAndDispatchAsync(
+        Guid ingredientId,
+        Guid userId,
+        decimal newPrice,
+        CancellationToken cancellationToken);
+}
+```
 
 **File:** `src/Nastart.Application/Services/PriceSpikeChecker.cs`
 
 ```csharp
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Application.Services;
 
-// Helper for detecting and alerting on ingredient price spikes
-public static class PriceSpikeChecker
+/// <summary>
+/// Injectable implementation of <see cref="IPriceSpikeChecker"/>.
+/// </summary>
+/// <remarks>
+/// Registered in the Application DI layer alongside <c>ICostCascadeService</c>.
+/// </remarks>
+public sealed class PriceSpikeChecker(
+    IAppDbContext db,
+    IAlertDispatcher alertDispatcher,
+    ILogger<PriceSpikeChecker> logger) : IPriceSpikeChecker
 {
-    public static async Task CheckAndDispatchPriceSpikeAsync(
+    // v1: hardcoded 10% threshold — alerts on any price change ≥10%.
+    // v2: read from ingredient.PriceSpikeThresholdPct instead (C-11 per-ingredient threshold).
+    private const decimal DefaultSpikeThresholdPct = 10m;
+
+    /// <inheritdoc/>
+    public async Task CheckAndDispatchAsync(
         Guid ingredientId,
         Guid userId,
         decimal newPrice,
-        IAppDbContext db,
-        IAlertDispatcher alertDispatcher,
-        ILogger logger,
         CancellationToken cancellationToken)
     {
-        // Fetch the previous price (2nd most recent CommittedAt)
+        // Fetch the previous price (2nd most recent CommittedAt).
+        // Skip(1) skips the record we just committed, which is now the most recent.
         var previousPrice = await db.IngredientPriceHistories
             .Where(iph => iph.IngredientId == ingredientId)
             .OrderByDescending(iph => iph.CommittedAt)
-            .Skip(1)  // Skip the most recent (which is the one we just committed)
+            .Skip(1)
             .Select(iph => (decimal?)iph.Price)
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
 
         if (previousPrice is null)
         {
-            // First price entry — no spike check possible
+            // First price entry for this ingredient — no baseline to compare against
             logger.LogInformation(
                 "Price spike check skipped for ingredient {IngredientId}: first price entry",
                 ingredientId);
             return;
         }
 
-        // Compute price change percentage
         decimal oldPrice = previousPrice.Value;
         decimal changePct = ((newPrice - oldPrice) / oldPrice) * 100m;
         decimal absChangePct = Math.Abs(changePct);
 
-        // Fetch ingredient to check spike threshold (C-11 recipients: Owner + Procurement)
-        // AsNoTracking — read-only; only PriceSpikeThresholdPct is read, never modified
-        var ingredient = await db.Ingredients
-            .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == ingredientId, cancellationToken);
-
-        if (ingredient is null)
-        {
-            logger.LogWarning("Ingredient {IngredientId} not found during spike check", ingredientId);
+        // v1: hardcoded threshold constant (see DefaultSpikeThresholdPct above)
+        // v2: replace with ingredient.PriceSpikeThresholdPct
+        if (absChangePct <= DefaultSpikeThresholdPct)
             return;
-        }
 
-        if (absChangePct > ingredient.PriceSpikeThresholdPct)
+        logger.LogWarning(
+            "Price spike detected on ingredient {IngredientId}: {OldPrice} → {NewPrice} "
+            + "({ChangePct:F1}% change, threshold = {Threshold}%)",
+            ingredientId,
+            oldPrice,
+            newPrice,
+            changePct,
+            DefaultSpikeThresholdPct);
+
+        // Await the alert with a try-catch so an unexpected dispatcher failure does not
+        // propagate to the caller and does not roll back the committed price record (C-5).
+        try
         {
-            logger.LogWarning(
-                "Price spike detected on ingredient {IngredientId}: {OldPrice} → {NewPrice} ({ChangePct:F1}% change, threshold={Threshold}%)",
-                ingredientId,
-                oldPrice,
-                newPrice,
-                changePct,
-                ingredient.PriceSpikeThresholdPct);
-
-            // Dispatch spike alert (fire-and-forget)
-            _ = alertDispatcher.SendPriceSpikeAlertAsync(
-                userId,
-                ingredientId,
-                oldPrice,
-                newPrice,
-                cancellationToken);
+            await alertDispatcher.SendPriceSpikeAlertAsync(
+                    userId,
+                    ingredientId,
+                    oldPrice,
+                    newPrice,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Failed to dispatch price spike alert for ingredient {IngredientId}",
+                ingredientId);
         }
     }
 }
@@ -685,12 +874,26 @@ public static class PriceSpikeChecker
 ```csharp
 namespace Nastart.Application.Common.Interfaces;
 
-// Interface for dispatching alerts to recipients via Python FastAPI alert service
-// In Phase 2, we use a console stub. In Phase 4 (L15), replaced with HTTP implementation.
+/// <summary>
+/// Dispatches operational alerts to the authenticated user via the configured notification channel.
+/// </summary>
+/// <remarks>
+/// <para><b>v1:</b> All alerts target the single authenticated user directly — no outlet scoping,
+/// no role-split payloads. The Phase 2 stub (<c>ConsoleAlertDispatcher</c>) logs to console.
+/// In Phase 4 (L15), replaced with <c>HttpAlertDispatcher</c> that POSTs to the Python FastAPI
+/// alert service. The interface contract is unchanged so no calling code requires modification.</para>
+/// <para>v2-only extension points are preserved as commented methods below.</para>
+/// </remarks>
 public interface IAlertDispatcher
 {
-    // Price spike alert: called when ingredient price changes exceed threshold
-    // v1: targets the single authenticated user directly
+    /// <summary>
+    /// Dispatches a price spike alert when an ingredient's price changes beyond the configured threshold.
+    /// </summary>
+    /// <param name="userId">ID of the owning user (v1: single authenticated user).</param>
+    /// <param name="ingredientId">ID of the ingredient whose price spiked.</param>
+    /// <param name="oldPrice">The most recently committed price before the spike.</param>
+    /// <param name="newPrice">The newly committed price that triggered the spike.</param>
+    /// <param name="cancellationToken">Propagates notification that the operation should be cancelled.</param>
     Task SendPriceSpikeAlertAsync(
         Guid userId,
         Guid ingredientId,
@@ -698,7 +901,23 @@ public interface IAlertDispatcher
         decimal newPrice,
         CancellationToken cancellationToken);
 
-    // v2-only: SendCostThresholdAlertAsync — no stored threshold in v1; personal Telegram alerts added in Phase 4 (L15)
+    // v2-only: SendCostThresholdAlertAsync
+    //   Notifies when a recipe's recalculated cost deviates beyond a per-recipe threshold (C-9).
+    //   No stored threshold in v1 — single user receives all spike alerts unconditionally.
+    //   Personal Telegram dispatch added in Phase 4 (L15).
+    //
+    // Task SendCostThresholdAlertAsync(
+    //     Guid userId, Guid recipeId,
+    //     decimal oldCost, decimal newCost,
+    //     CancellationToken cancellationToken);
+
+    // v2-only: SendSellPriceImpactAlertAsync
+    //   Notifies when a cost change materially shifts the derived sell price (C-12). Not built in v1.
+    //
+    // Task SendSellPriceImpactAlertAsync(
+    //     Guid userId, Guid recipeId,
+    //     decimal oldSellPrice, decimal newSellPrice,
+    //     CancellationToken cancellationToken);
 }
 ```
 
@@ -714,18 +933,20 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Infrastructure.Services;
 
-// Phase 2 stub implementation — logs alerts to console instead of sending to Python FastAPI.
-// In Phase 4 (L15), this is replaced with HttpAlertDispatcher that POSTs to the Python alert service.
-// The interface contract remains the same, so no calling code needs to change.
-public class ConsoleAlertDispatcher : IAlertDispatcher
+/// <summary>
+/// Phase 2 stub implementation of <see cref="IAlertDispatcher"/> that writes alerts to the
+/// application log instead of dispatching to an external service.
+/// </summary>
+/// <remarks>
+/// <para>Replaced in Phase 4 (L15) with <c>HttpAlertDispatcher</c>, which POSTs to the Python
+/// FastAPI alert service → Telegram. The <see cref="IAlertDispatcher"/> contract is unchanged,
+/// so no calling code requires modification at swap time.</para>
+/// <para><c>sealed</c>: this stub is not intended to be subclassed.</para>
+/// </remarks>
+public sealed class ConsoleAlertDispatcher(
+    ILogger<ConsoleAlertDispatcher> logger) : IAlertDispatcher
 {
-    private readonly ILogger<ConsoleAlertDispatcher> _logger;
-
-    public ConsoleAlertDispatcher(ILogger<ConsoleAlertDispatcher> logger)
-    {
-        _logger = logger;
-    }
-
+    /// <inheritdoc/>
     public Task SendPriceSpikeAlertAsync(
         Guid userId,
         Guid ingredientId,
@@ -733,10 +954,10 @@ public class ConsoleAlertDispatcher : IAlertDispatcher
         decimal newPrice,
         CancellationToken cancellationToken)
     {
-        _logger.LogWarning(
+        logger.LogWarning(
             "[ALERT STUB — Phase 2] Price spike on ingredient {IngredientId} for user {UserId}: "
-            + "{OldPrice:C} → {NewPrice:C}; "
-            + "In Phase 4, this would dispatch to Python FastAPI → Telegram recipients",
+            + "{OldPrice:C} → {NewPrice:C}. "
+            + "In Phase 4 (L15), this dispatches to Python FastAPI → Telegram.",
             ingredientId,
             userId,
             oldPrice,
@@ -745,8 +966,9 @@ public class ConsoleAlertDispatcher : IAlertDispatcher
         return Task.CompletedTask;
     }
 
-    // v2-only — not implemented in v1
-    // public Task SendCostThresholdAlertAsync(...) { }
+    // v2-only — not implemented in v1:
+    // public Task SendCostThresholdAlertAsync(...) { ... }
+    // public Task SendSellPriceImpactAlertAsync(...) { ... }
 }
 ```
 
@@ -764,6 +986,25 @@ using MediatR;
 
 namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
+/// <summary>
+/// Appends a new price history record for the specified ingredient.
+/// </summary>
+/// <remarks>
+/// <para>Append-only (C-5): the current price is always derived from the most recent
+/// <c>CommittedAt</c> entry (C-3). Never updates existing records.</para>
+/// <para>Triggers: (1) price spike check via <c>IPriceSpikeChecker</c>; (2) cascade
+/// recalculation of all recipes using this ingredient via <c>ICostCascadeService</c> (C-1).</para>
+/// </remarks>
+/// <param name="IngredientId">The ingredient to price.</param>
+/// <param name="UserId">
+/// The authenticated user's ID, extracted from JWT claims only — never accepted from the
+/// request body. Used to verify ownership (OWASP A01).
+/// </param>
+/// <param name="Price">The new price per package unit. Must be greater than zero.</param>
+/// <param name="EffectiveDate">
+/// Business-effective date of this price (C-4). Defaults to today (UTC) if omitted.
+/// Cannot be in the future.
+/// </param>
 public record AddIngredientPriceCommand(
     Guid IngredientId,
     Guid UserId,
@@ -777,11 +1018,24 @@ public record AddIngredientPriceCommand(
 ```csharp
 namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
+/// <summary>
+/// Returned after successfully committing a new ingredient price and running the cascade.
+/// </summary>
+/// <param name="PriceHistoryId">ID of the newly created <c>IngredientPriceHistory</c> record.</param>
+/// <param name="Price">The committed price value.</param>
+/// <param name="AffectedRecipes">
+/// Number of recipes whose <c>CostPerPortion</c> was successfully recalculated.
+/// </param>
+/// <param name="FailedRecipes">
+/// Number of recipes where cascade recalculation failed; each failure is persisted to
+/// <c>CascadeErrorLog</c> (C-5) without rolling back the committed price.
+/// </param>
 public record AddIngredientPriceResponse(
-    Guid IngredientPriceHistoryId,
+    Guid PriceHistoryId,
     decimal Price,
     int AffectedRecipes,
-    int FailedRecipes);
+    int FailedRecipes
+);
 ```
 
 **File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommandValidator.cs`
@@ -795,6 +1049,9 @@ public class AddIngredientPriceCommandValidator : AbstractValidator<AddIngredien
 {
     public AddIngredientPriceCommandValidator()
     {
+        RuleFor(x => x.UserId)
+            .NotEmpty().WithMessage("UserId is required.");
+
         RuleFor(x => x.IngredientId)
             .NotEmpty().WithMessage("IngredientId is required.");
 
@@ -812,95 +1069,87 @@ public class AddIngredientPriceCommandValidator : AbstractValidator<AddIngredien
 **File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceHandler.cs`
 
 This is the handler that was waiting for L7. It now:
-1. Verifies ingredient exists
-2. Commits new IngredientPriceHistory (C-3: the signal for "new price")
-3. Checks for price spike and dispatches alert
-4. Calls cascade service to recalculate all affected recipes
+1. Verifies ingredient exists and belongs to this user (OWASP A01)
+2. Commits new `IngredientPriceHistory` (C-3: the signal for "new price"; C-4: `CommittedAt` set by DB)
+3. Checks for price spike via `IPriceSpikeChecker` (non-fatal — alert failure never rolls back the price)
+4. Calls cascade service to recalculate all affected recipes (C-1)
 
 ```csharp
 using ErrorOr;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Nastart.Application.Common.Interfaces;
-using Nastart.Application.Services;
 using Nastart.Domain.Entities;
 using Nastart.Domain.Enums;
 
 namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
-public class AddIngredientPriceHandler
+public class AddIngredientPriceHandler(
+    IAppDbContext db,
+    ICostCascadeService cascadeService,
+    IPriceSpikeChecker priceSpikeChecker,
+    ILogger<AddIngredientPriceHandler> logger)
     : IRequestHandler<AddIngredientPriceCommand, ErrorOr<AddIngredientPriceResponse>>
 {
-    private readonly IAppDbContext _db;
-    private readonly ICostCascadeService _cascadeService;
-    private readonly IAlertDispatcher _alertDispatcher;
-    private readonly ILogger<AddIngredientPriceHandler> _logger;
-
-    public AddIngredientPriceHandler(
-        IAppDbContext db,
-        ICostCascadeService cascadeService,
-        IAlertDispatcher alertDispatcher,
-        ILogger<AddIngredientPriceHandler> logger)
-    {
-        _db = db;
-        _cascadeService = cascadeService;
-        _alertDispatcher = alertDispatcher;
-        _logger = logger;
-    }
-
     public async Task<ErrorOr<AddIngredientPriceResponse>> Handle(
         AddIngredientPriceCommand command,
         CancellationToken cancellationToken)
     {
-        // Verify ingredient exists AND belongs to this user (OWASP A01: Broken Access Control)
-        // Without the UserId check, any authenticated user could add prices to any ingredient by GUID
-        // AsNoTracking — read-only access control check; ingredient entity is never modified here
-        var ingredient = await _db.Ingredients
+        // OWASP A01: Verify the ingredient exists AND belongs to this user.
+        // Without the UserId check, any authenticated user could price any ingredient by GUID.
+        // AsNoTracking: read-only ownership check; ingredient is never modified here.
+        var ingredient = await db.Ingredients
             .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == command.IngredientId, cancellationToken);
+            .FirstOrDefaultAsync(i => i.Id == command.IngredientId, cancellationToken)
+            .ConfigureAwait(false);
 
         if (ingredient is null || ingredient.UserId != command.UserId)
             return Error.Forbidden("Ingredient.AccessDenied", "You do not have access to this ingredient.");
 
-        // C-3: Create new IngredientPriceHistory record (this IS the "current price" now)
+        // C-5: Append-only — never update or delete existing price records.
+        // C-13: Source = PriceSource.Manual serialised as 'Manual' (case-sensitive)
+        //        via .HasConversion<string>() in IngredientPriceHistoryConfiguration (L2).
+        // C-4: CommittedAt is NOT set here — DB inserts NOW() via HasDefaultValueSql.
+        //       Setting it in application code introduces clock-skew risk and violates C-4.
+        // UnitSize snapshot: captures the ingredient's package unit size at this price entry's
+        //   commit time. Each IngredientPriceHistory row carries its own UnitSize so that
+        //   historical C-2 calculations remain accurate even if the ingredient's unit size changes.
         var priceRecord = new IngredientPriceHistory
         {
             Id = Guid.NewGuid(),
-            IngredientId = ingredient.Id,
+            IngredientId = command.IngredientId,
             Price = command.Price,
-            UnitSize = ingredient.UnitSize,  // Snapshot at time of recording
-            Source = PriceSource.Manual,
-            // C-4: CommittedAt is NOT set here — DB sets it via HasDefaultValueSql("NOW()")
-            // Setting it in application code creates clock-skew risk and violates the canonical decision.
+            UnitSize = ingredient.UnitSize,    // Snapshot at commit time
+            Source = PriceSource.Manual,       // C-13: exactly 'Manual'
             EffectiveDate = command.EffectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow)
+            // CommittedAt: intentionally omitted — DB default inserts NOW() (C-4)
         };
 
-        _db.IngredientPriceHistories.Add(priceRecord);
-        await _db.SaveChangesAsync(cancellationToken);
+        db.IngredientPriceHistories.Add(priceRecord);
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation(
+        logger.LogInformation(
             "New price committed for ingredient {IngredientId}: {Price}",
             ingredient.Id,
             command.Price);
 
-        // Phase 2 will add spike check here (Advisory Note 4: fire-and-forget, does not block cascade)
-        // Price spike check: compare new price to previous price (if one exists)
-        await PriceSpikeChecker.CheckAndDispatchPriceSpikeAsync(
-            ingredient.Id,
-            ingredient.UserId,
-            command.Price,
-            _db,
-            _alertDispatcher,
-            _logger,
-            cancellationToken);
+        // Spike check: non-fatal. A dispatcher failure must not roll back the committed price (C-5).
+        await priceSpikeChecker.CheckAndDispatchAsync(
+                ingredient.Id,
+                ingredient.UserId,
+                command.Price,
+                cancellationToken)
+            .ConfigureAwait(false);
 
-        // C-1: Call cascade service to recalculate all recipes using this ingredient
-        // Per Advisory Note 4: cascade is synchronous for MVP — acceptable latency.
-        var cascadeResult = await _cascadeService.RecalculateForIngredientAsync(
-            ingredient.Id,
-            cancellationToken);
+        // C-1: Recalculate CostPerPortion on every recipe using this ingredient.
+        // Synchronous for v1 MVP — async background processing deferred to Phase 4.
+        var cascadeResult = await cascadeService.RecalculateForIngredientAsync(
+                ingredient.Id,
+                cancellationToken)
+            .ConfigureAwait(false);
 
-        _logger.LogInformation(
+        logger.LogInformation(
             "Cascade complete for ingredient {IngredientId}: {AffectedRecipes} recipes updated, {FailedRecipes} failed",
             ingredient.Id,
             cascadeResult.AffectedRecipes,
@@ -919,40 +1168,18 @@ public class AddIngredientPriceHandler
 
 ## 13. Dependency Injection Registration
 
-### Update Application Layer DI
-
-Add to `src/Nastart.Application/DependencyInjection.cs`:
-
-```csharp
-// Register CostCascadeService in Application layer
-// (Pure business logic + IAppDbContext, no 3rd party dependencies)
-services.AddScoped<ICostCascadeService, CostCascadeService>();
-```
-
-### Update Infrastructure Layer DI
-
-Add to `src/Nastart.Infrastructure/DependencyInjection.cs`:
-
-```csharp
-// Register alert dispatcher stub (Phase 2)
-// In Phase 4 (L15), replace with HttpAlertDispatcher for real Python FastAPI calls
-services.AddScoped<IAlertDispatcher, ConsoleAlertDispatcher>();
-```
-
-Make sure `ICostCascadeService` is added to the Application layer and `IAlertDispatcher` to Infrastructure:
-
 ```csharp
 // Application/DependencyInjection.cs
 public static IServiceCollection AddApplication(this IServiceCollection services)
 {
     services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<ApplicationAssemblyMarker>());
-    services.AddScoped<IValidator<CreateIngredientCommand>, CreateIngredientValidator>();
     services.AddValidatorsFromAssemblyContaining<ApplicationAssemblyMarker>();
     services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
-    
-    // NEW: Register cascade service
+
+    // Phase 2: cascade + spike checker (Application layer — no infrastructure deps)
     services.AddScoped<ICostCascadeService, CostCascadeService>();
-    
+    services.AddScoped<IPriceSpikeChecker, PriceSpikeChecker>();
+
     return services;
 }
 
@@ -962,10 +1189,10 @@ public static IServiceCollection AddInfrastructure(this IServiceCollection servi
     services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
     services.AddScoped<ITokenService, JwtTokenService>();
     services.AddScoped<IEmailService, ConsoleEmailService>();
-    
-    // NEW: Register alert dispatcher stub
+
+    // Phase 2 stub — replace with HttpAlertDispatcher in Phase 4 (L15)
     services.AddScoped<IAlertDispatcher, ConsoleAlertDispatcher>();
-    
+
     return services;
 }
 ```
@@ -1012,12 +1239,9 @@ public static IServiceCollection AddInfrastructure(this IServiceCollection servi
 4. **Check application logs:**
    - You should see:
      ```
-     [ALERT STUB] Price spike on ingredient {...}: 2.50 → 3.50 (40.0% change)
+     [ALERT STUB — Phase 2] Price spike on ingredient {...}: 2.50 → 3.50 (40.0% change, threshold = 10%)
      Recipe {...} recalculated: cost_per_portion = 6.15
-     Cascade complete for ingredient
-   ```
-
-5. **Query recipe cost again:**
+     Cascade complete for ingredient {...}: 1 recipes updated, 0 failed
    ```sql
    SELECT id, name, cost_per_portion FROM "Recipes" WHERE id = <recipe_id>;
    ```
@@ -1040,8 +1264,8 @@ public static IServiceCollection AddInfrastructure(this IServiceCollection servi
 ## 15. Testing the Cascade Service
 
 > Use MSTest 3.x with the EF Core In-Memory provider to unit-test `CostCascadeService`. Use NSubstitute for `IAlertDispatcher` and `ILogger<T>`. Assert on **outcome values** (`CostPerPortion`, `CascadeResult` counts, `CascadeErrorLog` presence) — not on mock call counts.
-
-> **Why In-Memory instead of NSubstitute for `IAppDbContext`?** The `latestPrices` batch query uses `GroupBy + OrderBy + Select + ToDictionaryAsync`, which EF Core's LINQ provider must translate. NSubstitute cannot fake this translation. The EF Core In-Memory provider executes the same LINQ in process with no mocking ceremony.
+>
+> **Why In-Memory instead of NSubstitute for `IAppDbContext`?** The `latestPrices` batch query uses `GroupBy + OrderBy + Select + ToDictionaryAsync`, which EF Core's LINQ provider must translate. NSubstitute cannot fake this translation. The EF Core In-Memory provider executes the same LINQ in-process with no mocking ceremony.
 
 ### Project Setup
 
@@ -1050,15 +1274,21 @@ public static IServiceCollection AddInfrastructure(this IServiceCollection servi
 <Project Sdk="MSTest.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="NSubstitute" Version="5.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.*" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Nastart.Application\Nastart.Application.csproj" />
+    <ProjectReference Include="..\..\src\Nastart.Infrastructure\Nastart.Infrastructure.csproj" />
+  </ItemGroup>
 </Project>
 ```
 
-### Key Test Cases
+### CostCascadeServiceTests
 
 **File:** `tests/Nastart.Application.Tests/Services/CostCascadeServiceTests.cs`
 
@@ -1066,9 +1296,9 @@ public static IServiceCollection AddInfrastructure(this IServiceCollection servi
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Services;
 using Nastart.Domain.Entities;
+using Nastart.Domain.Enums;
 using Nastart.Infrastructure.Data;
 
 namespace Nastart.Application.Tests.Services;
@@ -1076,99 +1306,201 @@ namespace Nastart.Application.Tests.Services;
 [TestClass]
 public sealed class CostCascadeServiceTests
 {
+    // Each test gets an isolated DB — Guid.NewGuid() name prevents cross-test state pollution
     private static AppDbContext CreateDb() =>
         new(new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options);
 
-    // Happy path — C-2 formula: (price/unitSize)*quantity*(1/yield)/portionCount
-    [TestMethod]
-    public async Task RecalculateForIngredientAsync_WhenRecipeUsesIngredient_UpdatesCostPerPortion()
+    // ─────────────────────────────────────────────────────────────────────────
+    // C-2 formula: cost_per_portion = SUM((price / UnitSizeSnapshot) * qty * (1 / yield)) / portions
+    // Parameterized to cover multiple formula scenarios in one method.
+    // ─────────────────────────────────────────────────────────────────────────
+    //   Scenario 1: (10/1000)*500*(1/1.0)/10  = 0.5000
+    //   Scenario 2: (5/500)*100*(1/1.0)/4     = 0.2500
+    //   Scenario 3: (100/10)*2*(1/0.85)/1     = 23.5294
+    public static IEnumerable<object[]> C2FormulaScenarios =>
+    [
+        // price, unitSize,  qty,   yield,  portions, expectedCostPerPortion
+        [10m,    1000m,     500m,   1.0m,   10,       0.5000m],
+        [5m,     500m,      100m,   1.0m,   4,        0.2500m],
+        [100m,   10m,       2m,     0.85m,  1,        23.5294m],
+    ];
+
+    [DataTestMethod]
+    [DynamicData(nameof(C2FormulaScenarios))]
+    public async Task RecalculateForIngredientAsync_C2FormulaScenarios_ComputesCorrectCostPerPortion(
+        decimal price, decimal unitSize, decimal quantity, decimal yieldPct, int portionCount, decimal expectedCost)
     {
         // Arrange
-        // C-2 values: 500g flour at $10/1000g, 10 portions, 100% yield
-        // Expected: (10/1000) * 500 * (1/1.0) / 10 = 0.5000
         using var db = CreateDb();
         var ingredientId = Guid.NewGuid();
-        var recipeId = Guid.NewGuid();
-        var userId = Guid.NewGuid();
+        var recipeId     = Guid.NewGuid();
+        var userId       = Guid.NewGuid();
 
-        db.Ingredients.Add(new Ingredient { Id = ingredientId, UserId = userId, Name = "Flour", UnitSize = 1000m });
+        db.Ingredients.Add(new Ingredient
+        {
+            Id = ingredientId, UserId = userId, Name = "Test Ingredient", UnitSize = unitSize
+        });
         db.IngredientPriceHistories.Add(new IngredientPriceHistory
         {
-            Id = Guid.NewGuid(), IngredientId = ingredientId, Price = 10m, CommittedAt = DateTime.UtcNow
+            Id = Guid.NewGuid(), IngredientId = ingredientId,
+            Price = price, CommittedAt = DateTime.UtcNow,
+            Source = PriceSource.Manual,
+            EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
         });
-        db.Recipes.Add(new Recipe { Id = recipeId, UserId = userId, Name = "Test Cake", PortionCount = 10, CostPerPortion = 0m, VersionGroupId = Guid.NewGuid() });
-        db.RecipeItems.Add(new RecipeItem { Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId, Quantity = 500m, YieldPercentage = 1.0m });
+        db.Recipes.Add(new Recipe
+        {
+            Id = recipeId, UserId = userId, Name = "Formula Test Recipe",
+            PortionCount = portionCount, CostPerPortion = 0m,
+            VersionGroupId = Guid.NewGuid()
+        });
+        db.RecipeItems.Add(new RecipeItem
+        {
+            Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId,
+            Quantity = quantity, YieldPercentage = yieldPct,
+            UnitSizeSnapshot = unitSize   // Decision A: snapshot at item-creation time
+        });
         await db.SaveChangesAsync();
 
-        var sut = new CostCascadeService(db, Substitute.For<IAlertDispatcher>(), Substitute.For<ILogger<CostCascadeService>>());
+        var sut = new CostCascadeService(db, Substitute.For<ILogger<CostCascadeService>>());
 
         // Act
         var result = await sut.RecalculateForIngredientAsync(ingredientId, CancellationToken.None);
 
-        // Assert — C-2: (10/1000) * 500 * (1/1.0) / 10 = 0.5000
+        // Assert
         Assert.AreEqual(1, result.AffectedRecipes);
         Assert.AreEqual(0, result.FailedRecipes);
         var updated = await db.Recipes.FindAsync(recipeId);
-        Assert.AreEqual(0.5000m, updated!.CostPerPortion);
+        Assert.AreEqual(
+            expectedCost,
+            updated!.CostPerPortion,
+            $"C-2 mismatch: ({price}/{unitSize})*{quantity}*(1/{yieldPct})/{portionCount}");
     }
 
-    // C-5: per-recipe error is written to CascadeErrorLog; remaining recipes are still processed
+    // ─────────────────────────────────────────────────────────────────────────
+    // C-2: multi-ingredient recipe — ALL item costs are summed before dividing by portionCount
+    //   Flour:  (10/1000)*500*(1/1.0) = 5.0
+    //   Butter: (20/250)*100*(1/1.0)  = 8.0
+    //   Total = 13.0 / 4 portions     = 3.2500
+    // ─────────────────────────────────────────────────────────────────────────
     [TestMethod]
-    public async Task RecalculateForIngredientAsync_WhenOneRecipeFails_LogsErrorAndContinuesOthers()
+    public async Task RecalculateForIngredientAsync_WhenMultipleIngredientsInRecipe_SumsAllItemCosts()
+    {
+        // Arrange
+        using var db = CreateDb();
+        var flourId  = Guid.NewGuid();
+        var butterId = Guid.NewGuid();
+        var recipeId = Guid.NewGuid();
+        var userId   = Guid.NewGuid();
+
+        db.Ingredients.AddRange(
+            new Ingredient { Id = flourId,  UserId = userId, Name = "Flour",  UnitSize = 1000m },
+            new Ingredient { Id = butterId, UserId = userId, Name = "Butter", UnitSize = 250m  }
+        );
+        db.IngredientPriceHistories.AddRange(
+            new IngredientPriceHistory
+            {
+                Id = Guid.NewGuid(), IngredientId = flourId,
+                Price = 10m, CommittedAt = DateTime.UtcNow,
+                Source = PriceSource.Manual, EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+            },
+            new IngredientPriceHistory
+            {
+                Id = Guid.NewGuid(), IngredientId = butterId,
+                Price = 20m, CommittedAt = DateTime.UtcNow,
+                Source = PriceSource.Manual, EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+            }
+        );
+        db.Recipes.Add(new Recipe
+        {
+            Id = recipeId, UserId = userId, Name = "Butter Cake",
+            PortionCount = 4, CostPerPortion = 0m, VersionGroupId = Guid.NewGuid()
+        });
+        db.RecipeItems.AddRange(
+            new RecipeItem
+            {
+                Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = flourId,
+                Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+            },
+            new RecipeItem
+            {
+                Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = butterId,
+                Quantity = 100m, YieldPercentage = 1.0m, UnitSizeSnapshot = 250m
+            }
+        );
+        await db.SaveChangesAsync();
+
+        var sut = new CostCascadeService(db, Substitute.For<ILogger<CostCascadeService>>());
+
+        // Act — cascade triggered for flour; butter's price is batch-loaded in the same pass
+        var result = await sut.RecalculateForIngredientAsync(flourId, CancellationToken.None);
+
+        // Assert — 5.0 (flour) + 8.0 (butter) = 13.0 / 4 = 3.2500
+        Assert.AreEqual(1, result.AffectedRecipes);
+        Assert.AreEqual(0, result.FailedRecipes);
+        var updated = await db.Recipes.FindAsync(recipeId);
+        Assert.AreEqual(3.2500m, updated!.CostPerPortion);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Guard: PortionCount = 0 → CostPerPortion clamped to 0, no DivideByZeroException
+    // ─────────────────────────────────────────────────────────────────────────
+    [TestMethod]
+    public async Task RecalculateForIngredientAsync_WhenPortionCountIsZero_SetsCostToZero()
     {
         // Arrange
         using var db = CreateDb();
         var ingredientId = Guid.NewGuid();
-        var userId = Guid.NewGuid();
+        var recipeId     = Guid.NewGuid();
+        var userId       = Guid.NewGuid();
 
-        db.Ingredients.Add(new Ingredient { Id = ingredientId, UserId = userId, Name = "Butter", UnitSize = 500m });
+        db.Ingredients.Add(new Ingredient
+        {
+            Id = ingredientId, UserId = userId, Name = "Flour", UnitSize = 1000m
+        });
         db.IngredientPriceHistories.Add(new IngredientPriceHistory
         {
-            Id = Guid.NewGuid(), IngredientId = ingredientId, Price = 5m, CommittedAt = DateTime.UtcNow
+            Id = Guid.NewGuid(), IngredientId = ingredientId,
+            Price = 10m, CommittedAt = DateTime.UtcNow,
+            Source = PriceSource.Manual, EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
         });
-
-        // Good recipe — valid yield, should succeed
-        var goodRecipeId = Guid.NewGuid();
-        db.Recipes.Add(new Recipe { Id = goodRecipeId, UserId = userId, Name = "Butter Cake", PortionCount = 4, CostPerPortion = 0m, VersionGroupId = Guid.NewGuid() });
-        db.RecipeItems.Add(new RecipeItem { Id = Guid.NewGuid(), RecipeId = goodRecipeId, IngredientId = ingredientId, Quantity = 100m, YieldPercentage = 1.0m });
-
-        // Bad recipe — YieldPercentage = 0 causes divide-by-zero in C-2 formula
-        var badRecipeId = Guid.NewGuid();
-        db.Recipes.Add(new Recipe { Id = badRecipeId, UserId = userId, Name = "Broken Recipe", PortionCount = 1, CostPerPortion = 0m, VersionGroupId = Guid.NewGuid() });
-        db.RecipeItems.Add(new RecipeItem { Id = Guid.NewGuid(), RecipeId = badRecipeId, IngredientId = ingredientId, Quantity = 50m, YieldPercentage = 0m });
+        db.Recipes.Add(new Recipe
+        {
+            Id = recipeId, UserId = userId, Name = "Zero Portion Recipe",
+            PortionCount = 0,                    // guard under test
+            CostPerPortion = 99m,                // pre-set to non-zero to prove it is overwritten
+            VersionGroupId = Guid.NewGuid()
+        });
+        db.RecipeItems.Add(new RecipeItem
+        {
+            Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId,
+            Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+        });
         await db.SaveChangesAsync();
 
-        var sut = new CostCascadeService(db, Substitute.For<IAlertDispatcher>(), Substitute.For<ILogger<CostCascadeService>>());
+        var sut = new CostCascadeService(db, Substitute.For<ILogger<CostCascadeService>>());
 
         // Act
         var result = await sut.RecalculateForIngredientAsync(ingredientId, CancellationToken.None);
 
-        // Assert — C-5: one failed, one succeeded; IngredientPriceHistory never rolled back
+        // Assert
         Assert.AreEqual(1, result.AffectedRecipes);
-        Assert.AreEqual(1, result.FailedRecipes);
-
-        // Good recipe was updated correctly: (5/500)*100*(1/1.0)/4 = 0.2500
-        var updatedGood = await db.Recipes.FindAsync(goodRecipeId);
-        Assert.AreEqual(0.2500m, updatedGood!.CostPerPortion);
-
-        // CascadeErrorLog has an entry for the failed recipe (C-5)
-        var errorLogged = await db.CascadeErrorLogs.AnyAsync(e => e.RecipeId == badRecipeId);
-        Assert.IsTrue(errorLogged, "CascadeErrorLog must contain an entry for the failed recipe.");
-
-        // IngredientPriceHistory is NOT rolled back (C-5)
-        var priceCount = await db.IngredientPriceHistories.CountAsync(p => p.IngredientId == ingredientId);
-        Assert.AreEqual(1, priceCount, "IngredientPriceHistory must not be rolled back on cascade failure.");
+        Assert.AreEqual(0, result.FailedRecipes);
+        var updated = await db.Recipes.FindAsync(recipeId);
+        Assert.AreEqual(0m, updated!.CostPerPortion,
+            "PortionCount=0 must clamp CostPerPortion to zero rather than throw DivideByZeroException");
     }
 
-    // C-3: no price history → cascade skips ingredient gracefully
+    // ─────────────────────────────────────────────────────────────────────────
+    // C-3: no price history → cascade skips the ingredient gracefully
+    // ─────────────────────────────────────────────────────────────────────────
     [TestMethod]
     public async Task RecalculateForIngredientAsync_WhenNoPriceHistory_ReturnsZeroCounts()
     {
         // Arrange
         using var db = CreateDb();
-        var sut = new CostCascadeService(db, Substitute.For<IAlertDispatcher>(), Substitute.For<ILogger<CostCascadeService>>());
+        var sut = new CostCascadeService(db, Substitute.For<ILogger<CostCascadeService>>());
 
         // Act
         var result = await sut.RecalculateForIngredientAsync(Guid.NewGuid(), CancellationToken.None);
@@ -1177,29 +1509,256 @@ public sealed class CostCascadeServiceTests
         Assert.AreEqual(0, result.AffectedRecipes);
         Assert.AreEqual(0, result.FailedRecipes);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // C-5: a per-recipe failure writes CascadeErrorLog and does NOT roll back
+    //      IngredientPriceHistory; remaining recipes are still processed
+    // ─────────────────────────────────────────────────────────────────────────
+    [TestMethod]
+    public async Task RecalculateForIngredientAsync_WhenOneRecipeFails_LogsErrorAndContinuesOthers()
+    {
+        // Arrange
+        using var db = CreateDb();
+        var ingredientId = Guid.NewGuid();
+        var userId       = Guid.NewGuid();
+
+        db.Ingredients.Add(new Ingredient
+        {
+            Id = ingredientId, UserId = userId, Name = "Butter", UnitSize = 500m
+        });
+        db.IngredientPriceHistories.Add(new IngredientPriceHistory
+        {
+            Id = Guid.NewGuid(), IngredientId = ingredientId,
+            Price = 5m, CommittedAt = DateTime.UtcNow,
+            Source = PriceSource.Manual, EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        });
+
+        // Good recipe — (5/500)*100*(1/1.0)/4 = 0.2500
+        var goodRecipeId = Guid.NewGuid();
+        db.Recipes.Add(new Recipe
+        {
+            Id = goodRecipeId, UserId = userId, Name = "Butter Cake",
+            PortionCount = 4, CostPerPortion = 0m, VersionGroupId = Guid.NewGuid()
+        });
+        db.RecipeItems.Add(new RecipeItem
+        {
+            Id = Guid.NewGuid(), RecipeId = goodRecipeId, IngredientId = ingredientId,
+            Quantity = 100m, YieldPercentage = 1.0m, UnitSizeSnapshot = 500m
+        });
+
+        // Bad recipe — YieldPercentage = 0 causes 1m/0m → DivideByZeroException in C-2 formula
+        var badRecipeId = Guid.NewGuid();
+        db.Recipes.Add(new Recipe
+        {
+            Id = badRecipeId, UserId = userId, Name = "Broken Recipe",
+            PortionCount = 1, CostPerPortion = 0m, VersionGroupId = Guid.NewGuid()
+        });
+        db.RecipeItems.Add(new RecipeItem
+        {
+            Id = Guid.NewGuid(), RecipeId = badRecipeId, IngredientId = ingredientId,
+            Quantity = 50m, YieldPercentage = 0m,    // zero yield → exception in C-2
+            UnitSizeSnapshot = 500m
+        });
+        await db.SaveChangesAsync();
+
+        var sut = new CostCascadeService(db, Substitute.For<ILogger<CostCascadeService>>());
+
+        // Act
+        var result = await sut.RecalculateForIngredientAsync(ingredientId, CancellationToken.None);
+
+        // Assert — C-5: counts
+        Assert.AreEqual(1, result.AffectedRecipes, "One recipe should succeed");
+        Assert.AreEqual(1, result.FailedRecipes,   "One recipe should fail");
+
+        var updatedGood = await db.Recipes.FindAsync(goodRecipeId);
+        Assert.AreEqual(0.2500m, updatedGood!.CostPerPortion,
+            "The successful recipe must be recalculated correctly");
+
+        // C-5: error is written to CascadeErrorLog
+        var errorLogged = await db.CascadeErrorLogs.AnyAsync(e => e.RecipeId == badRecipeId);
+        Assert.IsTrue(errorLogged, "C-5: CascadeErrorLog must contain an entry for the failed recipe.");
+
+        // C-5: IngredientPriceHistory is append-only — never rolled back on cascade failure
+        var priceCount = await db.IngredientPriceHistories
+            .CountAsync(p => p.IngredientId == ingredientId);
+        Assert.AreEqual(1, priceCount,
+            "C-5: IngredientPriceHistory must not be rolled back on cascade failure.");
+    }
+}
+```
+
+### PriceSpikeCheckerTests
+
+**File:** `tests/Nastart.Application.Tests/Services/PriceSpikeCheckerTests.cs`
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Application.Services;
+using Nastart.Domain.Entities;
+using Nastart.Domain.Enums;
+using Nastart.Infrastructure.Data;
+
+namespace Nastart.Application.Tests.Services;
+
+[TestClass]
+public sealed class PriceSpikeCheckerTests
+{
+    private static AppDbContext CreateDb() =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // First price entry — Skip(1) yields no previous record → no spike possible
+    // ─────────────────────────────────────────────────────────────────────────
+    [TestMethod]
+    public async Task CheckAndDispatch_WhenFirstPriceEntry_DoesNotDispatchAlert()
+    {
+        // Arrange
+        using var db = CreateDb();
+        var ingredientId = Guid.NewGuid();
+        var userId       = Guid.NewGuid();
+
+        db.Ingredients.Add(new Ingredient
+            { Id = ingredientId, UserId = userId, Name = "Sugar", UnitSize = 1000m });
+        // Exactly 1 record — Skip(1) returns nothing
+        db.IngredientPriceHistories.Add(new IngredientPriceHistory
+        {
+            Id = Guid.NewGuid(), IngredientId = ingredientId,
+            Price = 5m, CommittedAt = DateTime.UtcNow,
+            Source = PriceSource.Manual, EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        });
+        await db.SaveChangesAsync();
+
+        var alertDispatcher = Substitute.For<IAlertDispatcher>();
+        var sut = new PriceSpikeChecker(
+            db, alertDispatcher, Substitute.For<ILogger<PriceSpikeChecker>>());
+
+        // Act
+        await sut.CheckAndDispatchAsync(ingredientId, userId, newPrice: 5m, CancellationToken.None);
+
+        // Assert — no previous price means no comparison is possible
+        await alertDispatcher.DidNotReceive().SendPriceSpikeAlertAsync(
+            Arg.Any<Guid>(), Arg.Any<Guid>(),
+            Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Price change is within the threshold → no alert
+    // old=10, new=11 → 10% change = threshold → silent (threshold is exclusive: absChangePct <= 10)
+    // ─────────────────────────────────────────────────────────────────────────
+    [TestMethod]
+    public async Task CheckAndDispatch_WhenPriceChangeBelowOrAtThreshold_DoesNotDispatchAlert()
+    {
+        // Arrange
+        using var db = CreateDb();
+        var ingredientId = Guid.NewGuid();
+        var userId       = Guid.NewGuid();
+
+        db.Ingredients.Add(new Ingredient
+            { Id = ingredientId, UserId = userId, Name = "Eggs", UnitSize = 12m });
+        db.IngredientPriceHistories.AddRange(
+            new IngredientPriceHistory
+            {
+                Id = Guid.NewGuid(), IngredientId = ingredientId,
+                Price = 10m, CommittedAt = DateTime.UtcNow.AddMinutes(-10),  // previous
+                Source = PriceSource.Manual, EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+            },
+            new IngredientPriceHistory
+            {
+                Id = Guid.NewGuid(), IngredientId = ingredientId,
+                Price = 11m, CommittedAt = DateTime.UtcNow,                  // just committed
+                Source = PriceSource.Manual, EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+            }
+        );
+        await db.SaveChangesAsync();
+
+        var alertDispatcher = Substitute.For<IAlertDispatcher>();
+        var sut = new PriceSpikeChecker(
+            db, alertDispatcher, Substitute.For<ILogger<PriceSpikeChecker>>());
+
+        // Act
+        await sut.CheckAndDispatchAsync(ingredientId, userId, newPrice: 11m, CancellationToken.None);
+
+        // Assert — 10% change ≤ 10% threshold: no alert
+        await alertDispatcher.DidNotReceive().SendPriceSpikeAlertAsync(
+            Arg.Any<Guid>(), Arg.Any<Guid>(),
+            Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Price change exceeds threshold → alert dispatched with correct identity and prices
+    // old=10, new=15 → 50% change > 10% threshold → alert fires
+    // ─────────────────────────────────────────────────────────────────────────
+    [TestMethod]
+    public async Task CheckAndDispatch_WhenPriceChangeExceedsThreshold_DispatchesAlertWithCorrectValues()
+    {
+        // Arrange
+        using var db = CreateDb();
+        var ingredientId = Guid.NewGuid();
+        var userId       = Guid.NewGuid();
+
+        db.Ingredients.Add(new Ingredient
+            { Id = ingredientId, UserId = userId, Name = "Butter", UnitSize = 500m });
+        db.IngredientPriceHistories.AddRange(
+            new IngredientPriceHistory
+            {
+                Id = Guid.NewGuid(), IngredientId = ingredientId,
+                Price = 10m, CommittedAt = DateTime.UtcNow.AddMinutes(-10),  // previous
+                Source = PriceSource.Manual, EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+            },
+            new IngredientPriceHistory
+            {
+                Id = Guid.NewGuid(), IngredientId = ingredientId,
+                Price = 15m, CommittedAt = DateTime.UtcNow,                  // just committed
+                Source = PriceSource.Manual, EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+            }
+        );
+        await db.SaveChangesAsync();
+
+        var alertDispatcher = Substitute.For<IAlertDispatcher>();
+        var sut = new PriceSpikeChecker(
+            db, alertDispatcher, Substitute.For<ILogger<PriceSpikeChecker>>());
+
+        // Act
+        await sut.CheckAndDispatchAsync(ingredientId, userId, newPrice: 15m, CancellationToken.None);
+
+        // Assert — 50% change > 10% threshold → alert dispatched with correct old/new prices
+        await alertDispatcher.Received(1).SendPriceSpikeAlertAsync(
+            userId,
+            ingredientId,
+            10m,  // oldPrice
+            15m,  // newPrice
+            Arg.Any<CancellationToken>());
+    }
 }
 ```
 
 > **Key principles:**
-> - **Sealed test class** with `[TestClass]` — required per MSTest 3.x best practices
-> - **Assert on `CostPerPortion` value** — not on call counts of `IAlertDispatcher` or `ILogger`
-> - **Isolate each test** — `Guid.NewGuid().ToString()` as In-Memory database name prevents inter-test pollution
-> - **C-5 verification** — error path test confirms both `CascadeErrorLog` is written AND `IngredientPriceHistory` is retained
+> - **Sealed test classes** with `[TestClass]` — required per MSTest 3.x
+> - **`CostCascadeService` constructor** takes only `db + logger` (no `IAlertDispatcher` — moved to `PriceSpikeChecker`)
+> - **`RecipeItem.UnitSizeSnapshot`** populated in every test (Decision A committed)
+> - **`[DynamicData]`** for the parameterized C-2 formula scenarios — covers three formula configurations in one test method
+> - **Assert on outcome values** — `CostPerPortion`, `CascadeResult` counts, `CascadeErrorLog` presence; NOT mock call counts (except `PriceSpikeCheckerTests` which is specifically testing dispatch behaviour)
 
 ---
 
 ## 16. Key Takeaways
 
-- **C-1:** `ICostCascadeService` is the single, locked entry point. All cost recalculations go through it.
-- **C-2:** The cost formula normalizes units, accounts for yield %, and divides by portion count.
-- **C-3:** Current price is ALWAYS looked up fresh from `IngredientPriceHistories` — no caching on `Ingredient`.
-- **C-5:** Per-recipe cascade failures are logged, not rolled back. `IngredientPriceHistory` is append-only.
-- **C-9 (v2-only):** Per-recipe threshold — not built in v1; single user gets all alerts
-- **C-11 (v2-only):** Role-based alert recipients — not built in v1
-- **C-12 (v2-only):** Sell price impact alerts — not built in v1
-- **Application vs. Infrastructure:** Pure business logic (cascade) lives in Application layer. Infrastructure-dependent concerns (alert dispatch) are abstracted as interfaces.
+- **C-1:** `ICostCascadeService` is the single, locked entry point. All cost recalculations go through it. Price is never passed as a parameter — the service reads it internally (C-3).
+- **C-2:** The cost formula uses `UnitSizeSnapshot` (Decision A), not live `Ingredient.UnitSize`. Formula: `SUM((price / UnitSizeSnapshot) × qty × (1/yield)) / portionCount`.
+- **C-3:** Current price is ALWAYS looked up fresh from `IngredientPriceHistories ORDER BY committed_at DESC` — never from a cached field on `Ingredient`.
+- **C-5:** Per-recipe cascade failures are logged to `CascadeErrorLog` and skipped. `IngredientPriceHistory` is append-only and never rolled back.
+- **SRP — `IPriceSpikeChecker` is separate from `ICostCascadeService`:** Spike detection is not part of the cost formula. Separating them lets you test each independently and swap the threshold logic in v2 without touching the cascade.
+- **Fire-and-forget is dangerous:** The original static `PriceSpikeChecker` used `_ = alertDispatcher.SendPriceSpikeAlertAsync(...)`. Replaced with awaited try-catch so dispatcher failures are logged rather than silently swallowed.
+- **Primary constructor syntax:** All service classes (`CostCascadeService`, `PriceSpikeChecker`, `ConsoleAlertDispatcher`) use C# 12 primary constructors — no boilerplate field assignments.
+- **`ConfigureAwait(false)`** on every async DB call — prevents deadlocks in non-ASP.NET contexts and is consistent with the dotnet-best-practices skill.
+- **v2 preserved:** `CostThresholdPercentage` (C-9), role-split alerts (C-11), sell price impact alerts (C-12) are preserved as XML `<remarks>` and `// v2-only:` comments. Nothing was deleted.
 
-In L8, you'll add the CreateRecipe handler which also calls `ICostCascadeService` to compute initial costs.
+In L8, you'll add the `CreateRecipe` handler which also calls `ICostCascadeService` to compute initial costs after a recipe is saved.
 
 ---
 ```

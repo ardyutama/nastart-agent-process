@@ -1,5 +1,11 @@
 # Lesson 4 — Validation, Error Handling & the Result Pattern
 
+**← Previous:** L3 — Vertical Slice Architecture with MediatR  
+**→ Next:** L5 — JWT Authentication & Authorization  
+**→ Used in:** L6 (full ingredient CRUD slices), L7 (cascade command slice), L8 (recipe costing slices)
+
+---
+
 > **What you'll learn:**
 > - Why you should never throw exceptions for business logic errors
 > - The `ErrorOr<T>` result pattern — return errors as data, not exceptions
@@ -9,12 +15,23 @@
 
 > ⚠️ **v1 Solopreneur Amendments (April 9, 2026)**
 >
-> The `CreateIngredient` teaching example in this lesson uses `OutletId` as a scoping parameter. In v1, ingredients are user-scoped — not outlet-scoped. Apply these changes as you follow along:
-> - Replace every `Guid OutletId` in `CreateIngredientCommand` with `Guid UserId`
-> - Replace `i.OutletId == cmd.OutletId` duplicate checks with `i.UserId == cmd.UserId`
-> - Endpoints extract `UserId` from JWT (`httpContext.User.GetUserId()`) — not from a route parameter
+> This lesson teaches FluentValidation + ErrorOr + Pipeline Behaviors using a `CreateIngredient` slice. The patterns are identical between v1 and v2 — only scoping differs.
 >
-> The validation pattern (FluentValidation + MediatR pipeline behavior + ErrorOr) is unchanged and applies directly.
+> **Scope — User-scoped ingredients (not outlet-scoped):**
+>
+> | v2 pattern (teaching concept) | v1 replacement |
+> |---|---|
+> | `Guid OutletId` in `CreateIngredientCommand` | `Guid UserId` |
+> | `i.OutletId == cmd.OutletId` duplicate check | `i.UserId == cmd.UserId` |
+> | `outletId` from route parameter | `userId` extracted from JWT claim |
+>
+> **Note:** The code examples in this lesson already use `UserId` — they are v1-ready. The table above documents the conceptual difference for reference.
+>
+> **Endpoint dependency:** Endpoints in this lesson call `httpContext.User.GetUserId()`. This extension method is **defined in L5**. See the prerequisite note in Section 6.
+>
+> **Teaching scaffold:** The `CreateIngredient` slice here is a simplified teaching example. **L6 replaces it** with the production-ready version (full CRUD, price history). After completing L6, delete this L4 scaffold.
+>
+> The validation pattern (FluentValidation + MediatR pipeline behavior + ErrorOr) applies unchanged.
 
 ---
 
@@ -138,29 +155,26 @@ using Nastart.Domain.Enums;
 
 namespace Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 
-public class CreateIngredientHandler
+// Primary constructor — db parameter is captured and accessible in all methods (C# 12 / .NET 8+)
+public class CreateIngredientHandler(IAppDbContext db)
     : IRequestHandler<CreateIngredientCommand, ErrorOr<CreateIngredientResponse>>
 {
-    private readonly IAppDbContext _db;
-
-    public CreateIngredientHandler(IAppDbContext db)
-    {
-        _db = db;
-    }
-
     public async Task<ErrorOr<CreateIngredientResponse>> Handle(
         CreateIngredientCommand command, CancellationToken ct)
     {
         // Business rule: ingredient name must be unique within the user's ingredients
-        var exists = await _db.Ingredients
-            .AnyAsync(i => i.UserId == command.UserId && i.Name == command.Name, ct);
+        var exists = await db.Ingredients
+            .AnyAsync(i => i.UserId == command.UserId && i.Name == command.Name, ct)
+            .ConfigureAwait(false);
 
         if (exists)
             return Error.Conflict("Ingredient.Duplicate",
                 "An ingredient with this name already exists.");
 
         // Verify the unit exists
-        var unitExists = await _db.Units.AnyAsync(u => u.Id == command.UnitId, ct);
+        var unitExists = await db.Units
+            .AnyAsync(u => u.Id == command.UnitId, ct)
+            .ConfigureAwait(false);
         if (!unitExists)
             return Error.NotFound("Unit.NotFound", "The specified unit does not exist.");
 
@@ -175,7 +189,7 @@ public class CreateIngredientHandler
             PriceSpikeThresholdPct = command.PriceSpikeThresholdPct
         };
 
-        _db.Ingredients.Add(ingredient);
+        db.Ingredients.Add(ingredient);
 
         // If initial price provided, create the first price history record
         // C-3: Current price is always derived from IngredientPriceHistory
@@ -191,10 +205,10 @@ public class CreateIngredientHandler
                 // C-4: CommittedAt is NOT set here — the DB sets it via HasDefaultValueSql("NOW()")
                 EffectiveDate = command.EffectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow)
             };
-            _db.IngredientPriceHistories.Add(priceRecord);
+            db.IngredientPriceHistories.Add(priceRecord);
         }
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return new CreateIngredientResponse(ingredient.Id, ingredient.Name);
     }
@@ -266,48 +280,45 @@ namespace Nastart.Application.Common.Behaviors;
 // This behavior intercepts every MediatR request.
 // If a validator exists for the request type, it runs BEFORE the handler.
 // If validation fails, the handler is never called — errors return immediately.
-public class ValidationBehavior<TRequest, TResponse>
+//
+// Primary constructor: validator parameter is optional — if no IValidator<TRequest> is
+// registered in DI for this request type, the parameter is null and validation is skipped.
+public class ValidationBehavior<TRequest, TResponse>(IValidator<TRequest>? validator = null)
     : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
     where TResponse : IErrorOr
 {
-    private readonly IValidator<TRequest>? _validator;
-
-    // IValidator<TRequest> is optional — not every request has a validator.
-    // If no validator is registered for this request type, _validator is null.
-    public ValidationBehavior(IValidator<TRequest>? validator = null)
-    {
-        _validator = validator;
-    }
-
     public async Task<TResponse> Handle(
         TRequest request,
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
         // No validator registered for this request type — skip validation
-        if (_validator is null)
-            return await next();
+        if (validator is null)
+            return await next().ConfigureAwait(false);
 
-        var validationResult = await _validator.ValidateAsync(request, cancellationToken);
+        var validationResult = await validator
+            .ValidateAsync(request, cancellationToken)
+            .ConfigureAwait(false);
 
         if (validationResult.IsValid)
-            return await next();
+            return await next().ConfigureAwait(false);
 
         // Convert FluentValidation errors to ErrorOr errors
         var errors = validationResult.Errors
             .Select(e => Error.Validation(e.PropertyName, e.ErrorMessage))
             .ToList();
 
-        // Return errors without ever calling the handler
-        return (dynamic)errors;
+        // Cast through object to leverage ErrorOr's implicit List<Error> conversion.
+        // (TResponse)(object) is safer than (dynamic) — keeps compile-time type visibility.
+        return (TResponse)(object)errors;
     }
 }
 ```
 
 ### Register validators and behavior in DI
 
-Update `src/Nastart.Application/DependencyInjection.cs`:
+**Update** `src/Nastart.Application/DependencyInjection.cs` (extends the version created in L3 — do not replace the file from scratch):
 
 ```csharp
 using FluentValidation;
@@ -406,6 +417,19 @@ public static class ResultExtensions
 
 ### Update the Ingredient endpoint
 
+> ⚠️ **Prerequisite — `ClaimsPrincipalExtensions.GetUserId()`**
+>
+> The calls to `httpContext.User.GetUserId()` below require `ClaimsPrincipalExtensions`, which is **defined in L5**. If you haven't completed L5 yet, use this temporary stub in `src/Nastart.API/Extensions/ClaimsPrincipalExtensions.cs`:
+> ```csharp
+> public static class ClaimsPrincipalExtensions
+> {
+>     // L5 replaces this with a real JWT claim extraction
+>     public static Guid GetUserId(this System.Security.Claims.ClaimsPrincipal user)
+>         => Guid.Parse("c0000000-0000-0000-0000-000000000001");
+> }
+> ```
+> Delete this stub when you complete L5.
+
 **File:** `src/Nastart.API/Endpoints/IngredientEndpoints.cs`
 
 ```csharp
@@ -445,7 +469,11 @@ public static class IngredientEndpoints
 
             var result = await sender.Send(command, ct);
 
-            return result.ToCreatedResult($"/api/ingredients/{result.Value?.Id}");
+            // Check error first — only access result.Value on the success path
+            if (result.IsError)
+                return result.ToApiResult();
+
+            return Results.Created($"/api/ingredients/{result.Value!.Id}", result.Value);
         });
     }
 }
@@ -475,21 +503,14 @@ using Microsoft.AspNetCore.Diagnostics;
 
 namespace Nastart.API.Middleware;
 
-public class GlobalExceptionHandler : IExceptionHandler
+public class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger) : IExceptionHandler
 {
-    private readonly ILogger<GlobalExceptionHandler> _logger;
-
-    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger)
-    {
-        _logger = logger;
-    }
-
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,
         Exception exception,
         CancellationToken cancellationToken)
     {
-        _logger.LogError(exception, "Unhandled exception: {Message}", exception.Message);
+        logger.LogError(exception, "Unhandled exception: {Message}", exception.Message);
 
         httpContext.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
         await httpContext.Response.WriteAsJsonAsync(new
