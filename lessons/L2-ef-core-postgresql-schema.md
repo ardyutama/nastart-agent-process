@@ -385,6 +385,8 @@ public class User : BaseEntity
     // v2-only: OutletUsers removed — no OutletUser entity in v1
     public ICollection<TelegramLink> TelegramLinks { get; set; } = [];
     public ICollection<Ingredient> Ingredients { get; set; } = [];
+    // Added when Recipe entity is introduced in L7 — inverse nav for RecipeConfiguration.WithMany()
+    public ICollection<Recipe> Recipes { get; set; } = [];
 }
 ```
 
@@ -989,14 +991,13 @@ public class TelegramLinkConfiguration : IEntityTypeConfiguration<TelegramLink>
         // C-6: Store enum as lowercase strings — 'pending' | 'confirmed' | 'unlinked'
         // Default HasConversion<string>() would store PascalCase ("Pending") which
         // violates the canonical decision contract. This converter normalizes to lowercase.
-        // Uses generic Enum.Parse<T> (.NET 6+) — type-safe and avoids boxing.
-        // Enum.TryParse with a fallback guards against unexpected values in the DB.
+        // NOTE: Enum.TryParse with `out var` cannot be used directly inside a lambda expression
+        // tree (compiler error: "An expression tree may not contain an out argument variable
+        // declaration"). Extract to a static helper so the lambda body stays simple.
         builder.Property(t => t.Status)
             .HasConversion(
                 v => v.ToString().ToLowerInvariant(),
-                v => Enum.TryParse<TelegramLinkStatus>(v, ignoreCase: true, out var result)
-                    ? result
-                    : TelegramLinkStatus.Pending) // safe fallback — logs should surface unexpected values
+                v => ParseStatus(v)) // safe fallback — logs should surface unexpected values
             .HasMaxLength(20);
 
         // Index for querying links by user and status (used in linking + deactivation flows)
@@ -1011,6 +1012,15 @@ public class TelegramLinkConfiguration : IEntityTypeConfiguration<TelegramLink>
             .HasForeignKey(t => t.UserId)
             .OnDelete(DeleteBehavior.Cascade);
     }
+
+    // Static helper required because `out var` is not allowed inside lambda expression trees.
+    // EF Core's HasConversion reads the lambda as an expression tree at compile time,
+    // which prohibits out-parameter declarations. Extracting to a static method makes the
+    // lambda body a simple method call — valid in expression tree context.
+    private static TelegramLinkStatus ParseStatus(string value) =>
+        Enum.TryParse<TelegramLinkStatus>(value, ignoreCase: true, out var result)
+            ? result
+            : TelegramLinkStatus.Pending;
 }
 ```
 
@@ -1038,11 +1048,15 @@ public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
         // P1: CHECK constraints enforce data integrity at the database layer.
         // FluentValidation enforces these at the API boundary — the DB check is a
         // defence-in-depth guard against direct SQL inserts or migration seed errors.
-        builder.HasCheckConstraint("ck_ingredient_unit_size_positive", "unit_size > 0");
-        // P1: Spike threshold must be between 0 and 100 (percent) when set.
-        builder.HasCheckConstraint(
-            "ck_ingredient_spike_threshold_range",
-            "price_spike_threshold_pct IS NULL OR (price_spike_threshold_pct >= 0 AND price_spike_threshold_pct <= 100)");
+        // EF Core 7+: HasCheckConstraint is obsolete on the entity builder — use ToTable().
+        builder.ToTable(t =>
+        {
+            t.HasCheckConstraint("ck_ingredient_unit_size_positive", "unit_size > 0");
+            // P1: Spike threshold must be between 0 and 100 (percent) when set.
+            t.HasCheckConstraint(
+                "ck_ingredient_spike_threshold_range",
+                "price_spike_threshold_pct IS NULL OR (price_spike_threshold_pct >= 0 AND price_spike_threshold_pct <= 100)");
+        });
 
         builder.HasOne(i => i.User)
             .WithMany(u => u.Ingredients)
@@ -1098,9 +1112,17 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
         // C-13: Store enum as exact string — "Manual" or "InvoiceScan"
         builder.Property(p => p.Source).HasConversion<string>().HasMaxLength(20);
         // C-13: Defense-in-depth DB CHECK — guards against direct SQL inserts bypassing EF Core.
-        builder.HasCheckConstraint(
-            "ck_ingredient_price_history_source",
-            "source IN ('Manual', 'InvoiceScan')");
+        // EF Core 7+: HasCheckConstraint is obsolete on the entity builder — use ToTable().
+        builder.ToTable(t =>
+        {
+            t.HasCheckConstraint(
+                "ck_ingredient_price_history_source",
+                "source IN ('Manual', 'InvoiceScan')");
+            // P1: CHECK constraints — price and unit_size must be positive.
+            // Defense-in-depth: FluentValidation also enforces these at the API boundary.
+            t.HasCheckConstraint("ck_ingredient_price_history_price_positive", "price > 0");
+            t.HasCheckConstraint("ck_ingredient_price_history_unit_size_positive", "unit_size > 0");
+        });
 
         // C-4: System timestamp, set on insert. Used for current price ordering.
         // The application handler MUST also set CommittedAt = DateTimeOffset.UtcNow on creation.
@@ -1136,10 +1158,6 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
             .HasFilter("invoice_line_item_id IS NOT NULL")
             .HasDatabaseName("ingredient_price_histories_invoice_line_item_id_idx");
 
-        // P1: CHECK constraint — price must be positive.
-        // Defense-in-depth: FluentValidation also enforces this at the API boundary.
-        builder.HasCheckConstraint("ck_ingredient_price_history_price_positive", "price > 0");
-        builder.HasCheckConstraint("ck_ingredient_price_history_unit_size_positive", "unit_size > 0");
     }
 }
 ```

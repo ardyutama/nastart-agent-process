@@ -428,8 +428,8 @@ namespace Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 /// <summary>Projection of a single ingredient for list display.</summary>
 /// <remarks>
 /// Field names match the v1 Ingredient entity columns exactly.
-/// <c>CategoryName</c> and <c>PriceSpikeThreshold</c> are nullable because
-/// CategoryId is optional and PriceSpikeThreshold may not be set.
+/// <c>CategoryName</c> and <c>PriceSpikeThresholdPct</c> are nullable because
+/// CategoryId is optional and PriceSpikeThresholdPct may not be set.
 /// </remarks>
 public record IngredientListResponse(
     Guid Id,
@@ -437,7 +437,7 @@ public record IngredientListResponse(
     string? CategoryName,
     string UnitAbbreviation,
     decimal UnitSize,
-    decimal? PriceSpikeThreshold);
+    decimal? PriceSpikeThresholdPct);
 ```
 
 **File:** `src/Nastart.Application/Features/Ingredients/Queries/GetIngredients/GetIngredientsHandler.cs`
@@ -469,7 +469,7 @@ public class GetIngredientsHandler(IAppDbContext db)
                 i.Category != null ? i.Category.Name : null,
                 i.Unit.Abbreviation,
                 i.UnitSize,
-                i.PriceSpikeThreshold))
+                i.PriceSpikeThresholdPct))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
     }

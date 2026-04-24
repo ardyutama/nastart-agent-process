@@ -263,7 +263,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Nastart.Domain.Entities;
 
-namespace Nastart.Infrastructure.Data.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 /// <summary>
 /// EF Core Fluent API configuration for the <see cref="Recipe"/> entity.
@@ -338,7 +338,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Nastart.Domain.Entities;
 
-namespace Nastart.Infrastructure.Data.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 /// <summary>
 /// EF Core Fluent API configuration for the <see cref="RecipeItem"/> entity.
@@ -380,9 +380,11 @@ public sealed class RecipeItemConfiguration : IEntityTypeConfiguration<RecipeIte
         entity.Property(ri => ri.UnitSizeSnapshot)
             .HasPrecision(10, 4);
 
-        entity.HasCheckConstraint(
-            "ck_recipe_item_unit_size_snapshot_positive",
-            "unit_size_snapshot > 0");
+        // EF Core 7+: HasCheckConstraint is obsolete on the entity builder — use ToTable().
+        entity.ToTable(t =>
+            t.HasCheckConstraint(
+                "ck_recipe_item_unit_size_snapshot_positive",
+                "unit_size_snapshot > 0"));
 
         // Decision B (not chosen): remove UnitSizeSnapshot from RecipeItem entity and this
         // configuration; update CostCascadeService to use item.Ingredient.UnitSize and add
@@ -410,7 +412,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Nastart.Domain.Entities;
 
-namespace Nastart.Infrastructure.Data.Configurations;
+namespace Nastart.Infrastructure.Persistence.Configurations;
 
 /// <summary>
 /// EF Core Fluent API configuration for the <see cref="CascadeErrorLog"/> entity.

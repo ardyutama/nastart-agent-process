@@ -71,6 +71,17 @@
 > **Authorization — replace all role-based policies:**
 > - `"OwnerOrChef"`, `"CanViewRecipes"` → `RequireAuthorization()`
 
+> **v1 scope note (already integrated)**
+>
+> This lesson is written for the **v1 single-user** scope. v2 artifacts are preserved as `// v2-only:` comments so future migration is straightforward. Nothing in this lesson needs correction before use — the v1 design is the authoritative version.
+>
+> | v2 concept | Where preserved |
+> |---|---|
+> | `RecipeOwnerResponse` / `RecipeStandardResponse` (role-split DTOs, C-10) | `RecipeResponse.cs` `// v2-only:` stubs in `GetRecipes` + `GetRecipeById` namespaces |
+> | Role-based `[Authorize]` policies (C-8, C-10) | `RecipeEndpoints.cs` `// v2-only:` inline comments |
+> | `CostThresholdPercentage` (per-Recipe, C-9) | `Recipe` entity XML `<remarks>` — defined in L7 entities |
+> | Outlet-scoped routes (`/api/outlets/{outletId}/recipes`) | Route comment in `RecipeEndpoints.cs` |
+
 ---
 
 ## 1. Why CostPerPortion is Server-Authoritative
@@ -311,23 +322,16 @@ using Nastart.Domain.Entities;
 
 namespace Nastart.Application.Features.Recipes.Commands.CreateRecipe;
 
-public class CreateRecipeHandler : IRequestHandler<CreateRecipeCommand, ErrorOr<CreateRecipeResponse>>
+public sealed class CreateRecipeHandler(IAppDbContext db, ICostCascadeService cascade)
+    : IRequestHandler<CreateRecipeCommand, ErrorOr<CreateRecipeResponse>>
 {
-    private readonly IAppDbContext _db;
-    private readonly ICostCascadeService _cascade;
-
-    public CreateRecipeHandler(IAppDbContext db, ICostCascadeService cascade)
-    {
-        _db = db;
-        _cascade = cascade;
-    }
-
     public async Task<ErrorOr<CreateRecipeResponse>> Handle(
         CreateRecipeCommand command, CancellationToken ct)
     {
         // Business rule: Prevent duplicate recipe names within the user's scope
-        var isDuplicate = await _db.Recipes
-            .AnyAsync(r => r.UserId == command.UserId && r.Name == command.Name, ct);
+        var isDuplicate = await db.Recipes
+            .AnyAsync(r => r.UserId == command.UserId && r.Name == command.Name, ct)
+            .ConfigureAwait(false);
 
         if (isDuplicate)
             return Error.Conflict("Recipe.Duplicate",
@@ -336,10 +340,11 @@ public class CreateRecipeHandler : IRequestHandler<CreateRecipeCommand, ErrorOr<
         // Business rule: All ingredients must belong to this user AND we need their UnitSize
         // values to populate RecipeItem.UnitSizeSnapshot (L7 Decision A).
         var ingredientIds = command.RecipeItems.Select(r => r.IngredientId).Distinct().ToList();
-        var ingredientSizes = await _db.Ingredients
+        var ingredientSizes = await db.Ingredients
             .Where(i => i.UserId == command.UserId && ingredientIds.Contains(i.Id))
             .Select(i => new { i.Id, i.UnitSize })
-            .ToDictionaryAsync(i => i.Id, i => i.UnitSize, ct);
+            .ToDictionaryAsync(i => i.Id, i => i.UnitSize, ct)
+            .ConfigureAwait(false);
 
         if (ingredientSizes.Count != ingredientIds.Count)
             return Error.NotFound("Ingredient.NotFound",
@@ -362,7 +367,7 @@ public class CreateRecipeHandler : IRequestHandler<CreateRecipeCommand, ErrorOr<
             VersionLabel = command.VersionLabel
         };
 
-        _db.Recipes.Add(recipe);
+        db.Recipes.Add(recipe);
 
         // Create all RecipeItems
         // UnitSizeSnapshot: captured from ingredient.UnitSize at creation time (L7 Decision A).
@@ -379,26 +384,28 @@ public class CreateRecipeHandler : IRequestHandler<CreateRecipeCommand, ErrorOr<
         }).ToList();
 
         foreach (var item in recipeItems)
-            _db.RecipeItems.Add(item);
+            db.RecipeItems.Add(item);
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // C-1: Trigger cascade for each unique ingredient to compute CostPerPortion
         // Cascade will:
         //   1. Fetch current ingredient prices (C-3)
         //   2. Apply formula (C-2) for all recipes using these ingredients
         //   3. Update Recipe.CostPerPortion in database
-        //   4. Evaluate threshold alerts (C-12), dispatch if exceeded
+        //   4. Dispatch price spike alert if threshold exceeded (C-12)
         foreach (var ingredientId in ingredientIds)
         {
-            await _cascade.RecalculateForIngredientAsync(ingredientId, ct);
+            await cascade.RecalculateForIngredientAsync(ingredientId, ct)
+                .ConfigureAwait(false);
         }
 
         // Re-fetch recipe to get the updated CostPerPortion from cascade
         // AsNoTracking — read-only re-fetch for return value only
-        var updatedRecipe = await _db.Recipes
+        var updatedRecipe = await db.Recipes
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == recipe.Id, ct)
+            .ConfigureAwait(false)
             ?? throw new InvalidOperationException("Recipe not found after creation.");
 
         return new CreateRecipeResponse(
@@ -479,24 +486,18 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Application.Features.Recipes.Queries.GetRecipes;
 
-public class GetRecipesHandler
+public sealed class GetRecipesHandler(IAppDbContext db)
     : IRequestHandler<GetRecipesQuery, ErrorOr<List<RecipeResponse>>>
 {
-    private readonly IAppDbContext _db;
-
-    public GetRecipesHandler(IAppDbContext db)
-    {
-        _db = db;
-    }
-
     public async Task<ErrorOr<List<RecipeResponse>>> Handle(
         GetRecipesQuery query, CancellationToken ct)
     {
-        var recipes = await _db.Recipes
+        var recipes = await db.Recipes
             .AsNoTracking()
             .Where(r => r.UserId == query.UserId)
             .OrderBy(r => r.Name)
-            .ToListAsync(ct);
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
         var responses = recipes.Select(recipe =>
         {
@@ -566,9 +567,28 @@ public record RecipeItemDetail(
 ```csharp
 namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 
-// ❌ v2-only — RecipeByIdOwnerResponse removed in v1. Use unified RecipeResponse below.
+// v2-only — RecipeByIdOwnerResponse: role-split owner DTO removed in v1.
+//   In v2, owners see all fields including cost breakdowns and per-recipe thresholds.
+//   Use unified RecipeResponse (below) for v1.
 
-// ❌ v2-only — RecipeByIdStandardResponse removed in v1. Use unified RecipeResponse below.
+// v2-only — RecipeByIdStandardResponse: role-split standard DTO removed in v1.
+//   In v2, chefs/procurement see limited fields (no financials). Use unified RecipeResponse for v1.
+
+// v1: single authenticated user sees all fields including item details
+public record RecipeResponse(
+    Guid Id,
+    string Name,
+    int PortionCount,
+    decimal CostPerPortion,
+    decimal PackagingCost,
+    decimal TargetMargin,
+    decimal? DerivedSellPrice,
+    decimal? FoodCostPct,
+    List<RecipeItemDetail> Items,  // populated by GetRecipeByIdHandler; absent from list endpoint
+    int VersionNumber,
+    string VersionLabel,
+    Guid VersionGroupId
+);
 ```
 
 ### Handler
@@ -583,35 +603,27 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 
-public class GetRecipeByIdHandler : IRequestHandler<GetRecipeByIdQuery, ErrorOr<RecipeResponse>>
+public sealed class GetRecipeByIdHandler(IAppDbContext db)
+    : IRequestHandler<GetRecipeByIdQuery, ErrorOr<RecipeResponse>>
 {
-    private readonly IAppDbContext _db;
-
-    public GetRecipeByIdHandler(IAppDbContext db)
-    {
-        _db = db;
-    }
-
     public async Task<ErrorOr<RecipeResponse>> Handle(
         GetRecipeByIdQuery query, CancellationToken ct)
     {
-        var recipe = await _db.Recipes
+        var recipe = await db.Recipes
             .AsNoTracking()
             .Include(r => r.RecipeItems)
             .ThenInclude(ri => ri.Ingredient)
-            .FirstOrDefaultAsync(r => r.Id == query.RecipeId, ct);
+            .FirstOrDefaultAsync(r => r.Id == query.RecipeId, ct)
+            .ConfigureAwait(false);
 
         if (recipe is null || recipe.UserId != query.UserId)
             return Error.NotFound("Recipe.NotFound",
                 "Recipe not found or doesn't belong to this user.");
 
-        // Build RecipeItemDetails with current prices from IngredientPriceHistory (C-3)
-        var itemDetails = new List<RecipeItemDetail>();
-
         // Batch-load latest prices for all ingredients in this recipe — avoids N+1 queries.
         // Without this, the foreach below would fire one DB query per recipe item.
         var ingredientIds = recipe.RecipeItems.Select(ri => ri.IngredientId).Distinct().ToList();
-        var latestPrices = await _db.IngredientPriceHistories
+        var latestPrices = await db.IngredientPriceHistories
             .Where(ph => ingredientIds.Contains(ph.IngredientId))
             .GroupBy(ph => ph.IngredientId)
             .Select(g => new
@@ -619,22 +631,22 @@ public class GetRecipeByIdHandler : IRequestHandler<GetRecipeByIdQuery, ErrorOr<
                 IngredientId = g.Key,
                 Price = (decimal?)g.OrderByDescending(ph => ph.CommittedAt).First().Price
             })
-            .ToDictionaryAsync(x => x.IngredientId, x => x.Price, ct);
+            .ToDictionaryAsync(x => x.IngredientId, x => x.Price, ct)
+            .ConfigureAwait(false);
 
-        foreach (var recipeItem in recipe.RecipeItems)
+        // Build RecipeItemDetails with current prices from IngredientPriceHistory (C-3)
+        var itemDetails = recipe.RecipeItems.Select(recipeItem =>
         {
-            // C-3: current price from pre-loaded batch (avoids N+1)
             latestPrices.TryGetValue(recipeItem.IngredientId, out var currentPrice);
-
-            itemDetails.Add(new RecipeItemDetail(
+            return new RecipeItemDetail(
                 recipeItem.Id,
                 recipeItem.IngredientId,
                 recipeItem.Ingredient.Name,
                 recipeItem.Quantity,
                 recipeItem.YieldPercentage,
                 currentPrice
-            ));
-        }
+            );
+        }).ToList();
 
         decimal? derivedSellPrice = recipe.TargetMargin < 1m
             ? (recipe.CostPerPortion + recipe.PackagingCost) / (1m - recipe.TargetMargin)
@@ -647,6 +659,7 @@ public class GetRecipeByIdHandler : IRequestHandler<GetRecipeByIdQuery, ErrorOr<
             recipe.Id, recipe.Name, recipe.PortionCount,
             recipe.CostPerPortion, recipe.PackagingCost, recipe.TargetMargin,
             derivedSellPrice, foodCostPct,
+            itemDetails,
             recipe.VersionNumber, recipe.VersionLabel, recipe.VersionGroupId);
     }
 }
@@ -733,25 +746,18 @@ using Nastart.Domain.Entities;
 
 namespace Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
 
-public class AddRecipeItemHandler : IRequestHandler<AddRecipeItemCommand, ErrorOr<AddRecipeItemResponse>>
+public sealed class AddRecipeItemHandler(IAppDbContext db, ICostCascadeService cascade)
+    : IRequestHandler<AddRecipeItemCommand, ErrorOr<AddRecipeItemResponse>>
 {
-    private readonly IAppDbContext _db;
-    private readonly ICostCascadeService _cascade;
-
-    public AddRecipeItemHandler(IAppDbContext db, ICostCascadeService cascade)
-    {
-        _db = db;
-        _cascade = cascade;
-    }
-
     public async Task<ErrorOr<AddRecipeItemResponse>> Handle(
         AddRecipeItemCommand command, CancellationToken ct)
     {
         // Verify recipe belongs to user (404 if not)
         // AsNoTracking — access-control check only; recipe is never modified in this handler
-        var recipe = await _db.Recipes
+        var recipe = await db.Recipes
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == command.RecipeId && r.UserId == command.UserId, ct);
+            .FirstOrDefaultAsync(r => r.Id == command.RecipeId && r.UserId == command.UserId, ct)
+            .ConfigureAwait(false);
 
         if (recipe is null)
             return Error.NotFound("Recipe.NotFound",
@@ -759,17 +765,19 @@ public class AddRecipeItemHandler : IRequestHandler<AddRecipeItemCommand, ErrorO
 
         // Verify ingredient belongs to user (404 if not)
         // AsNoTracking — access-control check only; ingredient is never modified in this handler
-        var ingredient = await _db.Ingredients
+        var ingredient = await db.Ingredients
             .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == command.IngredientId && i.UserId == command.UserId, ct);
+            .FirstOrDefaultAsync(i => i.Id == command.IngredientId && i.UserId == command.UserId, ct)
+            .ConfigureAwait(false);
 
         if (ingredient is null)
             return Error.NotFound("Ingredient.NotFound",
                 "Ingredient not found or doesn't belong to this user.");
 
         // Check ingredient not already in recipe (409 conflict)
-        var alreadyExists = await _db.RecipeItems
-            .AnyAsync(ri => ri.RecipeId == command.RecipeId && ri.IngredientId == command.IngredientId, ct);
+        var alreadyExists = await db.RecipeItems
+            .AnyAsync(ri => ri.RecipeId == command.RecipeId && ri.IngredientId == command.IngredientId, ct)
+            .ConfigureAwait(false);
 
         if (alreadyExists)
             return Error.Conflict("RecipeItem.Duplicate",
@@ -788,17 +796,19 @@ public class AddRecipeItemHandler : IRequestHandler<AddRecipeItemCommand, ErrorO
             UnitSizeSnapshot = ingredient.UnitSize    // Decision A
         };
 
-        _db.RecipeItems.Add(recipeItem);
-        await _db.SaveChangesAsync(ct);
+        db.RecipeItems.Add(recipeItem);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // C-1: Trigger cascade to recalculate cost for this ingredient's affected recipes
-        await _cascade.RecalculateForIngredientAsync(command.IngredientId, ct);
+        await cascade.RecalculateForIngredientAsync(command.IngredientId, ct)
+            .ConfigureAwait(false);
 
         // Re-fetch recipe to get updated cost
         // AsNoTracking — read-only re-fetch for return value only
-        var updatedRecipe = await _db.Recipes
+        var updatedRecipe = await db.Recipes
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == command.RecipeId, ct)
+            .ConfigureAwait(false)
             ?? throw new InvalidOperationException("Recipe not found after item addition.");
 
         return new AddRecipeItemResponse(
@@ -863,35 +873,28 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Application.Features.Recipes.Commands.RemoveRecipeItem;
 
-public class RemoveRecipeItemHandler
+public sealed class RemoveRecipeItemHandler(IAppDbContext db, ICostCascadeService cascade)
     : IRequestHandler<RemoveRecipeItemCommand, ErrorOr<RemoveRecipeItemResponse>>
 {
-    private readonly IAppDbContext _db;
-    private readonly ICostCascadeService _cascade;
-
-    public RemoveRecipeItemHandler(IAppDbContext db, ICostCascadeService cascade)
-    {
-        _db = db;
-        _cascade = cascade;
-    }
-
     public async Task<ErrorOr<RemoveRecipeItemResponse>> Handle(
         RemoveRecipeItemCommand command, CancellationToken ct)
     {
         // Verify recipe belongs to user
         // AsNoTracking — access-control check only; recipeItem (not recipe) is the entity being removed
-        var recipe = await _db.Recipes
+        var recipe = await db.Recipes
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == command.RecipeId && r.UserId == command.UserId, ct);
+            .FirstOrDefaultAsync(r => r.Id == command.RecipeId && r.UserId == command.UserId, ct)
+            .ConfigureAwait(false);
 
         if (recipe is null)
             return Error.NotFound("Recipe.NotFound",
                 "Recipe not found or doesn't belong to this user.");
 
         // Verify RecipeItem belongs to this recipe
-        // Change-tracked — recipeItem is passed to _db.RecipeItems.Remove() below
-        var recipeItem = await _db.RecipeItems
-            .FirstOrDefaultAsync(ri => ri.Id == command.RecipeItemId && ri.RecipeId == command.RecipeId, ct);
+        // Change-tracked — recipeItem is passed to db.RecipeItems.Remove() below
+        var recipeItem = await db.RecipeItems
+            .FirstOrDefaultAsync(ri => ri.Id == command.RecipeItemId && ri.RecipeId == command.RecipeId, ct)
+            .ConfigureAwait(false);
 
         if (recipeItem is null)
             return Error.NotFound("RecipeItem.NotFound",
@@ -901,17 +904,19 @@ public class RemoveRecipeItemHandler
         var ingredientId = recipeItem.IngredientId;
 
         // Delete RecipeItem
-        _db.RecipeItems.Remove(recipeItem);
-        await _db.SaveChangesAsync(ct);
+        db.RecipeItems.Remove(recipeItem);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // C-1: Trigger cascade — removal of item may affect cost
-        await _cascade.RecalculateForIngredientAsync(ingredientId, ct);
+        await cascade.RecalculateForIngredientAsync(ingredientId, ct)
+            .ConfigureAwait(false);
 
         // Re-fetch recipe to get updated cost
         // AsNoTracking — read-only re-fetch for return value only
-        var updatedRecipe = await _db.Recipes
+        var updatedRecipe = await db.Recipes
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == command.RecipeId, ct)
+            .ConfigureAwait(false)
             ?? throw new InvalidOperationException("Recipe not found after item removal.");
 
         return new RemoveRecipeItemResponse(
@@ -977,27 +982,19 @@ using Nastart.Domain.Entities;
 
 namespace Nastart.Application.Features.Recipes.Commands.CreateRecipeVersion;
 
-public class CreateRecipeVersionHandler
+public sealed class CreateRecipeVersionHandler(IAppDbContext db, ICostCascadeService cascade)
     : IRequestHandler<CreateRecipeVersionCommand, ErrorOr<CreateRecipeVersionResponse>>
 {
-    private readonly IAppDbContext _db;
-    private readonly ICostCascadeService _cascade;
-
-    public CreateRecipeVersionHandler(IAppDbContext db, ICostCascadeService cascade)
-    {
-        _db = db;
-        _cascade = cascade;
-    }
-
     public async Task<ErrorOr<CreateRecipeVersionResponse>> Handle(
         CreateRecipeVersionCommand command, CancellationToken ct)
     {
         // Fetch source recipe with RecipeItems (404 if wrong user)
         // AsNoTracking — source recipe is read-only (items are copied to new recipe, never modified here)
-        var sourceRecipe = await _db.Recipes
+        var sourceRecipe = await db.Recipes
             .AsNoTracking()
             .Include(r => r.RecipeItems)
-            .FirstOrDefaultAsync(r => r.Id == command.SourceRecipeId && r.UserId == command.UserId, ct);
+            .FirstOrDefaultAsync(r => r.Id == command.SourceRecipeId && r.UserId == command.UserId, ct)
+            .ConfigureAwait(false);
 
         if (sourceRecipe is null)
             return Error.NotFound("Recipe.NotFound",
@@ -1018,7 +1015,7 @@ public class CreateRecipeVersionHandler
             VersionLabel = command.VersionLabel
         };
 
-        _db.Recipes.Add(newRecipe);
+        db.Recipes.Add(newRecipe);
 
         // Copy all RecipeItems verbatim from source
         // UnitSizeSnapshot: copy the snapshot from the source item — the unit size
@@ -1034,9 +1031,9 @@ public class CreateRecipeVersionHandler
         }).ToList();
 
         foreach (var item in copiedItems)
-            _db.RecipeItems.Add(item);
+            db.RecipeItems.Add(item);
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // C-1: Trigger cascade for each unique ingredient to compute independent CostPerPortion
         var ingredientIds = sourceRecipe.RecipeItems
@@ -1046,14 +1043,16 @@ public class CreateRecipeVersionHandler
 
         foreach (var ingredientId in ingredientIds)
         {
-            await _cascade.RecalculateForIngredientAsync(ingredientId, ct);
+            await cascade.RecalculateForIngredientAsync(ingredientId, ct)
+                .ConfigureAwait(false);
         }
 
         // Re-fetch new recipe to get computed CostPerPortion
         // AsNoTracking — read-only re-fetch for return value only
-        var updatedNewRecipe = await _db.Recipes
+        var updatedNewRecipe = await db.Recipes
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == newRecipe.Id, ct)
+            .ConfigureAwait(false)
             ?? throw new InvalidOperationException("New recipe not found after creation.");
 
         return new CreateRecipeVersionResponse(
@@ -1149,23 +1148,16 @@ using Nastart.Application.Common.Interfaces;
 
 namespace Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
 
-public class UpdateRecipeHandler : IRequestHandler<UpdateRecipeCommand, ErrorOr<UpdateRecipeResponse>>
+public sealed class UpdateRecipeHandler(IAppDbContext db, ICostCascadeService cascade)
+    : IRequestHandler<UpdateRecipeCommand, ErrorOr<UpdateRecipeResponse>>
 {
-    private readonly IAppDbContext _db;
-    private readonly ICostCascadeService _cascade;
-
-    public UpdateRecipeHandler(IAppDbContext db, ICostCascadeService cascade)
-    {
-        _db = db;
-        _cascade = cascade;
-    }
-
     public async Task<ErrorOr<UpdateRecipeResponse>> Handle(
         UpdateRecipeCommand command, CancellationToken ct)
     {
-        var recipe = await _db.Recipes
+        var recipe = await db.Recipes
             .Include(r => r.RecipeItems)
-            .FirstOrDefaultAsync(r => r.Id == command.RecipeId && r.UserId == command.UserId, ct);
+            .FirstOrDefaultAsync(r => r.Id == command.RecipeId && r.UserId == command.UserId, ct)
+            .ConfigureAwait(false);
 
         if (recipe is null)
             return Error.NotFound("Recipe.NotFound",
@@ -1174,8 +1166,9 @@ public class UpdateRecipeHandler : IRequestHandler<UpdateRecipeCommand, ErrorOr<
         // Check for duplicate name if name changed
         if (recipe.Name != command.Name)
         {
-            var isDuplicate = await _db.Recipes
-                .AnyAsync(r => r.UserId == command.UserId && r.Name == command.Name && r.Id != command.RecipeId, ct);
+            var isDuplicate = await db.Recipes
+                .AnyAsync(r => r.UserId == command.UserId && r.Name == command.Name && r.Id != command.RecipeId, ct)
+                .ConfigureAwait(false);
 
             if (isDuplicate)
                 return Error.Conflict("Recipe.Duplicate",
@@ -1192,7 +1185,7 @@ public class UpdateRecipeHandler : IRequestHandler<UpdateRecipeCommand, ErrorOr<
         recipe.TargetMargin = command.TargetMargin;
         recipe.VersionLabel = command.VersionLabel;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // C-1 & C-2: If PortionCount changed, trigger cascade for all ingredients
         // because cost formula includes portion_count — change requires recalculation
@@ -1205,14 +1198,16 @@ public class UpdateRecipeHandler : IRequestHandler<UpdateRecipeCommand, ErrorOr<
 
             foreach (var ingredientId in ingredientIds)
             {
-                await _cascade.RecalculateForIngredientAsync(ingredientId, ct);
+                await cascade.RecalculateForIngredientAsync(ingredientId, ct)
+                    .ConfigureAwait(false);
             }
 
             // Re-fetch to get updated CostPerPortion
             // AsNoTracking — read-only re-fetch; the previous tracked entity has already been saved
-            recipe = await _db.Recipes
+            recipe = await db.Recipes
                 .AsNoTracking()
                 .FirstOrDefaultAsync(r => r.Id == command.RecipeId, ct)
+                .ConfigureAwait(false)
                 ?? throw new InvalidOperationException("Recipe not found after update.");
         }
 
@@ -1296,7 +1291,6 @@ public static class RecipeEndpoints
 
         // POST /api/recipes — create recipe
         group.MapPost("/", CreateRecipe)
-            .RequireAuthorization()
             .WithName("CreateRecipe")
             .WithOpenApi();
 
@@ -1307,27 +1301,26 @@ public static class RecipeEndpoints
 
         // PUT /api/recipes/{recipeId} — update metadata
         group.MapPut("/{recipeId}", UpdateRecipe)
-            .RequireAuthorization()
             .WithName("UpdateRecipe")
             .WithOpenApi();
 
         // POST /api/recipes/{recipeId}/items — add item
         group.MapPost("/{recipeId}/items", AddRecipeItem)
-            .RequireAuthorization()
             .WithName("AddRecipeItem")
             .WithOpenApi();
 
         // DELETE /api/recipes/{recipeId}/items/{recipeItemId} — remove item
         group.MapDelete("/{recipeId}/items/{recipeItemId}", RemoveRecipeItem)
-            .RequireAuthorization()
             .WithName("RemoveRecipeItem")
             .WithOpenApi();
 
         // POST /api/recipes/{recipeId}/versions — create version
         group.MapPost("/{recipeId}/versions", CreateRecipeVersion)
-            .RequireAuthorization()
             .WithName("CreateRecipeVersion")
             .WithOpenApi();
+
+        // v2-only: outlet-scoped routes (/api/outlets/{outletId}/recipes) will replace
+        // these flat routes when multi-tenant scoping is introduced in v2.
     }
 
     // Handler implementations
@@ -1559,6 +1552,30 @@ curl -X POST "http://localhost:5000/api/recipes/$RECIPE_ID/items" \
 # Note: CostPerPortion updated via cascade (C-1)
 ```
 
+### Step 5: Update metadata without triggering cascade
+
+```bash
+curl -X PUT "http://localhost:5000/api/recipes/$RECIPE_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test Pasta Carbonara — Deluxe",
+    "portionCount": 4,
+    "packagingCost": 0.60,
+    "targetMargin": 0.40,
+    "versionLabel": "v1"
+  }'
+
+# Expected: 200 OK
+# {
+#   "id": "recipe-uuid-1",
+#   "name": "Test Pasta Carbonara — Deluxe",
+#   "costPerPortion": 3.62
+# }
+# Note: portionCount unchanged (still 4) — cascade is NOT triggered.
+# Only name, packagingCost, targetMargin, versionLabel were updated.
+```
+
 ### Step 6: Verify updated cost propagated
 
 ```bash
@@ -1661,7 +1678,7 @@ Result: Recipe.CostPerPortion is ALWAYS server-authoritative, computed post-save
 | **C-2** | Cascade service implements the canonical formula. No handlers compute cost directly. Formula: `cost_per_portion = SUM( (current_price / unit_size) * quantity * (1 / yield_percentage) ) / portion_count` |
 | **C-3** | Current price_always fetched using: `SELECT price FROM IngredientPriceHistory WHERE ingredient_id = @id ORDER BY committed_at DESC LIMIT 1` |
 | **C-9** | `Recipe.CostThresholdPercentage` is removed in v1 — no stored threshold; personal Telegram spike alerts added in Phase 4 (L15) |
-| **C-10** | Unified `RecipeResponse` — single user sees all fields. // C-10 is v2-only — applies when multi-user roles are introduced |
+| **C-10** | Unified `RecipeResponse` — single user sees all fields (including `Items` on detail endpoint). Role-split DTOs are v2-only (`// v2-only:` stubs preserved in `RecipeResponse.cs`). |
 | **C-12** | Cost threshold alert removed in v1 — no stored threshold. Spike alerts dispatched via `IAlertDispatcher.SendPriceSpikeAlertAsync(userId, ...)` |
 
 ---
@@ -1676,7 +1693,7 @@ Across L6–L8, you now have:
 | Ingredient price history + current price lookup (C-3) | ✅ (L7) |
 | CostCascadeService + canonical formula (C-2) | ✅ (L7) |
 | Recipe creation with automatic cost computation | ✅ (L8) |
-| Recipe queries with role-split responses (C-10) | ✅ (L8) |
+| Recipe queries with unified `RecipeResponse` (C-10 v2-preview) | ✅ (L8) |
 | Recipe items: add, remove (cascade triggered) | ✅ (L8) |
 | Recipe versioning (independent live versions) | ✅ (L8) |
 | 7 complete vertical slices + REST endpoints | ✅ (L8) |
@@ -1846,6 +1863,346 @@ public sealed class DerivedSellPriceTests
 > - **Assert on values** — check `CostPerPortion`, `DerivedSellPrice`, and recipe scoping; never assert on cascade mock invocation counts
 > - **Isolate formula tests** — `DerivedSellPriceTests` has no DB dependency; it's fast and deterministic
 > - **One In-Memory DB per test** — `Guid.NewGuid().ToString()` as database name prevents inter-test state pollution
+
+**File:** `tests/Nastart.Application.Tests/Features/Recipes/GetRecipeByIdHandlerTests.cs`
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Nastart.Application.Features.Recipes.Queries.GetRecipeById;
+using Nastart.Domain.Entities;
+using Nastart.Infrastructure.Data;
+
+namespace Nastart.Application.Tests.Features.Recipes;
+
+[TestClass]
+public sealed class GetRecipeByIdHandlerTests
+{
+    [TestMethod]
+    public async Task Handle_ReturnsItemDetails_WithCurrentPrices()
+    {
+        // Arrange
+        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+        var userId = Guid.NewGuid();
+        var recipeId = Guid.NewGuid();
+        var ingredientId = Guid.NewGuid();
+
+        db.Ingredients.Add(new Ingredient
+            { Id = ingredientId, UserId = userId, Name = "Flour", UnitSize = 1000m });
+        db.Recipes.Add(new Recipe
+        {
+            Id = recipeId, UserId = userId, Name = "Brownie Box", PortionCount = 12,
+            VersionGroupId = Guid.NewGuid(), VersionNumber = 1, VersionLabel = "Standard",
+            CostPerPortion = 2.50m, PackagingCost = 0.30m, TargetMargin = 0.35m
+        });
+        db.RecipeItems.Add(new RecipeItem
+        {
+            Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId,
+            Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+        });
+        db.IngredientPriceHistories.Add(new IngredientPriceHistory
+        {
+            Id = Guid.NewGuid(), IngredientId = ingredientId, Price = 2.50m,
+            Source = PriceSource.Manual, CommittedAt = DateTime.UtcNow,
+            EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new GetRecipeByIdHandler(db);
+
+        // Act
+        var result = await handler.Handle(new GetRecipeByIdQuery(recipeId, userId), CancellationToken.None);
+
+        // Assert — Items list is populated and CurrentPrice matches price history
+        Assert.IsFalse(result.IsError);
+        Assert.AreEqual(1, result.Value.Items.Count);
+        Assert.AreEqual(2.50m, result.Value.Items[0].CurrentPrice,
+            "CurrentPrice should match the price from IngredientPriceHistory (C-3)");
+    }
+
+    [TestMethod]
+    public async Task Handle_WrongUser_ReturnsNotFound()
+    {
+        // Arrange
+        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+        var ownerUserId = Guid.NewGuid();
+        var attackerUserId = Guid.NewGuid();
+        var recipeId = Guid.NewGuid();
+
+        db.Recipes.Add(new Recipe
+        {
+            Id = recipeId, UserId = ownerUserId, Name = "Secret Recipe", PortionCount = 4,
+            VersionGroupId = Guid.NewGuid(), VersionNumber = 1
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new GetRecipeByIdHandler(db);
+
+        // Act — attacker queries owner's recipe
+        var result = await handler.Handle(new GetRecipeByIdQuery(recipeId, attackerUserId), CancellationToken.None);
+
+        // Assert — returns NotFound, not the recipe
+        Assert.IsTrue(result.IsError);
+        Assert.AreEqual(ErrorType.NotFound, result.FirstError.Type);
+    }
+}
+```
+
+**File:** `tests/Nastart.Application.Tests/Features/Recipes/CreateRecipeVersionHandlerTests.cs`
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using NSubstitute;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Application.Features.Recipes.Commands.CreateRecipeVersion;
+using Nastart.Domain.Entities;
+using Nastart.Infrastructure.Data;
+
+namespace Nastart.Application.Tests.Features.Recipes;
+
+[TestClass]
+public sealed class CreateRecipeVersionHandlerTests
+{
+    private static ICostCascadeService MakeCascadeStub()
+    {
+        var stub = Substitute.For<ICostCascadeService>();
+        stub.RecalculateForIngredientAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new CascadeResult(1, 0));
+        return stub;
+    }
+
+    [TestMethod]
+    public async Task Handle_NewVersion_SharesSameVersionGroupId()
+    {
+        // Arrange
+        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+        var userId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var versionGroupId = Guid.NewGuid();
+        var ingredientId = Guid.NewGuid();
+
+        db.Ingredients.Add(new Ingredient
+            { Id = ingredientId, UserId = userId, Name = "Flour", UnitSize = 1000m });
+        db.Recipes.Add(new Recipe
+        {
+            Id = sourceId, UserId = userId, Name = "Brownie", PortionCount = 12,
+            VersionGroupId = versionGroupId, VersionNumber = 1, VersionLabel = "Standard"
+        });
+        db.RecipeItems.Add(new RecipeItem
+        {
+            Id = Guid.NewGuid(), RecipeId = sourceId, IngredientId = ingredientId,
+            Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new CreateRecipeVersionHandler(db, MakeCascadeStub());
+
+        // Act
+        var result = await handler.Handle(
+            new CreateRecipeVersionCommand(sourceId, userId, "Premium"), CancellationToken.None);
+
+        // Assert — new version shares the same VersionGroupId as source
+        Assert.IsFalse(result.IsError);
+        Assert.AreEqual(versionGroupId, result.Value.VersionGroupId,
+            "New recipe version must share VersionGroupId with source (groups all versions of same concept)");
+    }
+
+    [TestMethod]
+    public async Task Handle_NewVersion_HasIncrementedVersionNumber()
+    {
+        // Arrange
+        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+        var userId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var ingredientId = Guid.NewGuid();
+
+        db.Ingredients.Add(new Ingredient
+            { Id = ingredientId, UserId = userId, Name = "Flour", UnitSize = 1000m });
+        db.Recipes.Add(new Recipe
+        {
+            Id = sourceId, UserId = userId, Name = "Brownie", PortionCount = 12,
+            VersionGroupId = Guid.NewGuid(), VersionNumber = 1, VersionLabel = "Standard"
+        });
+        db.RecipeItems.Add(new RecipeItem
+        {
+            Id = Guid.NewGuid(), RecipeId = sourceId, IngredientId = ingredientId,
+            Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new CreateRecipeVersionHandler(db, MakeCascadeStub());
+
+        // Act
+        var result = await handler.Handle(
+            new CreateRecipeVersionCommand(sourceId, userId, "Premium"), CancellationToken.None);
+
+        // Assert — version number increments from 1 → 2
+        Assert.IsFalse(result.IsError);
+        Assert.AreEqual(2, result.Value.VersionNumber,
+            "VersionNumber should be source.VersionNumber + 1");
+    }
+}
+```
+
+**File:** `tests/Nastart.Application.Tests/Features/Recipes/UpdateRecipeHandlerTests.cs`
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using NSubstitute;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
+using Nastart.Domain.Entities;
+using Nastart.Infrastructure.Data;
+
+namespace Nastart.Application.Tests.Features.Recipes;
+
+[TestClass]
+public sealed class UpdateRecipeHandlerTests
+{
+    [TestMethod]
+    public async Task Handle_PortionCountChanged_TriggersCascadePerUniqueIngredient()
+    {
+        // Arrange
+        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+        var userId = Guid.NewGuid();
+        var recipeId = Guid.NewGuid();
+        var ingredientId1 = Guid.NewGuid();
+        var ingredientId2 = Guid.NewGuid();
+
+        db.Recipes.Add(new Recipe
+        {
+            Id = recipeId, UserId = userId, Name = "Brownie Box", PortionCount = 12,
+            VersionGroupId = Guid.NewGuid(), VersionNumber = 1, VersionLabel = "Standard"
+        });
+        db.RecipeItems.AddRange(
+            new RecipeItem { Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId1,
+                Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m },
+            new RecipeItem { Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId2,
+                Quantity = 300m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m }
+        );
+        await db.SaveChangesAsync();
+
+        var cascadeStub = Substitute.For<ICostCascadeService>();
+        cascadeStub.RecalculateForIngredientAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new CascadeResult(1, 0));
+
+        var handler = new UpdateRecipeHandler(db, cascadeStub);
+
+        // Act — change portion count from 12 → 24
+        var result = await handler.Handle(
+            new UpdateRecipeCommand(recipeId, userId, "Brownie Box", 24, 0.30m, 0.35m, "Standard"),
+            CancellationToken.None);
+
+        // Assert — cascade called once per unique ingredient (C-1: all cost-affecting mutations)
+        Assert.IsFalse(result.IsError);
+        await cascadeStub.Received(2).RecalculateForIngredientAsync(
+            Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+    }
+
+    [TestMethod]
+    public async Task Handle_PortionCountUnchanged_DoesNotTriggerCascade()
+    {
+        // Arrange
+        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+        var userId = Guid.NewGuid();
+        var recipeId = Guid.NewGuid();
+
+        db.Recipes.Add(new Recipe
+        {
+            Id = recipeId, UserId = userId, Name = "Brownie Box", PortionCount = 12,
+            VersionGroupId = Guid.NewGuid(), VersionNumber = 1, VersionLabel = "Standard"
+        });
+        await db.SaveChangesAsync();
+
+        var cascadeStub = Substitute.For<ICostCascadeService>();
+        cascadeStub.RecalculateForIngredientAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new CascadeResult(1, 0));
+
+        var handler = new UpdateRecipeHandler(db, cascadeStub);
+
+        // Act — change name only, same portion count
+        var result = await handler.Handle(
+            new UpdateRecipeCommand(recipeId, userId, "Brownie Box — Deluxe", 12, 0.30m, 0.35m, "Standard"),
+            CancellationToken.None);
+
+        // Assert — cascade NOT called (only name/packaging/margin changed, not portion count)
+        Assert.IsFalse(result.IsError);
+        await cascadeStub.DidNotReceive().RecalculateForIngredientAsync(
+            Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+    }
+}
+```
+
+**File:** `tests/Nastart.Application.Tests/Features/Recipes/AddRecipeItemHandlerTests.cs`
+
+```csharp
+using ErrorOr;
+using Microsoft.EntityFrameworkCore;
+using NSubstitute;
+using Nastart.Application.Common.Interfaces;
+using Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
+using Nastart.Domain.Entities;
+using Nastart.Infrastructure.Data;
+
+namespace Nastart.Application.Tests.Features.Recipes;
+
+[TestClass]
+public sealed class AddRecipeItemHandlerTests
+{
+    [TestMethod]
+    public async Task Handle_DuplicateIngredient_ReturnsConflict()
+    {
+        // Arrange
+        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+        var userId = Guid.NewGuid();
+        var recipeId = Guid.NewGuid();
+        var ingredientId = Guid.NewGuid();
+
+        db.Ingredients.Add(new Ingredient
+            { Id = ingredientId, UserId = userId, Name = "Flour", UnitSize = 1000m });
+        db.Recipes.Add(new Recipe
+        {
+            Id = recipeId, UserId = userId, Name = "Brownie Box", PortionCount = 12,
+            VersionGroupId = Guid.NewGuid(), VersionNumber = 1
+        });
+        db.RecipeItems.Add(new RecipeItem
+        {
+            Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId,
+            Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+        });
+        await db.SaveChangesAsync();
+
+        var cascadeStub = Substitute.For<ICostCascadeService>();
+        cascadeStub.RecalculateForIngredientAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new CascadeResult(1, 0));
+
+        var handler = new AddRecipeItemHandler(db, cascadeStub);
+
+        // Act — try to add same ingredient a second time
+        var result = await handler.Handle(
+            new AddRecipeItemCommand(recipeId, userId, ingredientId, 300m, 0.95m),
+            CancellationToken.None);
+
+        // Assert — Conflict (not a duplicate save attempt)
+        Assert.IsTrue(result.IsError);
+        Assert.AreEqual(ErrorType.Conflict, result.FirstError.Type,
+            "Adding the same ingredient twice should return Conflict, not a second item");
+    }
+}
+```
 
 ---
 
