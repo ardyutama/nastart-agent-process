@@ -1422,9 +1422,9 @@ public static class RecipeEndpoints
 }
 ```
 
-### Register endpoints and policies in Program.cs
+### Register endpoints in Program.cs
 
-Update `src/Nastart.API/Program.cs` to add authorization policies:
+Update `src/Nastart.API/Program.cs` to keep authorization enabled and map the recipe endpoints:
 
 ```csharp
 // After builder.Services.AddAuthorization():
@@ -2230,19 +2230,34 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddApplication();
 
 // L2: AppDbContext + Npgsql
-// L5: IPasswordHasher → BcryptPasswordHasher, ITokenService → JwtTokenService, IEmailService → ConsoleEmailService
+// L5: IPasswordHasher → BcryptPasswordHasher, ITokenService → JwtTokenService, IEmailService → ConsoleEmailService (dev-only)
 // L7: IAlertDispatcher → ConsoleAlertDispatcher
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
 
 // L4: Registers GlobalExceptionHandler (IExceptionHandler)
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
-// L5: JWT Authentication + Authorization policies
+// L5: Keep the same JWT Authentication setup from L5 here.
+// TokenValidationParameters stay in Program.cs — they are not moved into AddInfrastructure.
 builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        // Loaded from AddInfrastructure — see L5 for full TokenValidationParameters setup
+        options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            ClockSkew = TimeSpan.Zero,
+            IssuerSigningKey = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(
+                System.Text.Encoding.UTF8.GetBytes(
+                    builder.Configuration["Jwt:SecretKey"]
+                    ?? throw new InvalidOperationException(
+                        "Jwt:SecretKey is not configured. Set via user-secrets or environment variable.")))
+        };
     });
 
 // v1: no role-based policies — single authenticated user uses RequireAuthorization() only
@@ -2266,11 +2281,11 @@ app.UseAuthorization();             // L5: Enforces RequireAuthorization() on en
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", phase = "Phase 2 complete" }));
 
 app.MapAuthEndpoints();             // L5: /api/auth/register, /login, /verify-email
-app.MapOutletEndpoints();           // L3+L5: /api/outlets — ⚠️ v2-only: skip in v1
+// app.MapOutletEndpoints();        // L3+L5: /api/outlets — v2-only: skip in v1
 app.MapIngredientEndpoints();       // L6: /api/ingredients + /prices
 app.MapRecipeEndpoints();           // L8: /api/recipes + /items + /versions
 
 app.Run();
 ```
 
-> **Note:** `AddJwtBearer` options are defined inside `AddInfrastructure()` (see L5's `Infrastructure/DependencyInjection.cs`) — they are not duplicated here. `Program.cs` only calls the extension methods; each layer owns its own configuration.
+> **Note:** Keep the full JWT authentication block from L5 in `Program.cs`. `AddInfrastructure()` owns infrastructure service registration, but `TokenValidationParameters` stay in the API startup code. Keep the infrastructure method signature consistent with earlier lessons by passing both `builder.Configuration` and `builder.Environment`.

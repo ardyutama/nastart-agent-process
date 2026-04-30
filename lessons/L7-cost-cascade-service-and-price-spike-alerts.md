@@ -1186,11 +1186,20 @@ public static IServiceCollection AddApplication(this IServiceCollection services
 }
 
 // Infrastructure/DependencyInjection.cs
-public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration config)
+public static IServiceCollection AddInfrastructure(
+    this IServiceCollection services,
+    IConfiguration configuration,
+    IHostEnvironment environment)
 {
     services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
     services.AddScoped<ITokenService, JwtTokenService>();
-    services.AddScoped<IEmailService, ConsoleEmailService>();
+
+    if (environment.IsDevelopment())
+        services.AddScoped<IEmailService, ConsoleEmailService>();
+    else
+        throw new InvalidOperationException(
+            "No production email provider is configured. " +
+            "Register a real IEmailService implementation for non-development environments.");
 
     // Phase 2 stub — replace with HttpAlertDispatcher in Phase 4 (L15)
     services.AddScoped<IAlertDispatcher, ConsoleAlertDispatcher>();
@@ -1198,6 +1207,8 @@ public static IServiceCollection AddInfrastructure(this IServiceCollection servi
     return services;
 }
 ```
+
+> Reuse the same `AddInfrastructure(builder.Configuration, builder.Environment)` pattern from L2, L3, and L5 so later lessons do not silently change the method signature.
 
 ---
 

@@ -209,6 +209,7 @@ The connection string is split across two files. `appsettings.json` contains a s
 dotnet add src/Nastart.Infrastructure package Microsoft.EntityFrameworkCore
 dotnet add src/Nastart.Infrastructure package Npgsql.EntityFrameworkCore.PostgreSQL
 dotnet add src/Nastart.Infrastructure package EFCore.NamingConventions
+dotnet add src/Nastart.Infrastructure package Microsoft.Extensions.Hosting
 
 # API needs the EF Core design-time tools for migrations
 dotnet add src/Nastart.API package Microsoft.EntityFrameworkCore.Design
@@ -218,6 +219,7 @@ dotnet add src/Nastart.Application package Microsoft.EntityFrameworkCore
 ```
 
 > `UseSnakeCaseNamingConvention()` comes from the `EFCore.NamingConventions` package. Without that package, the extension method will not compile.
+> `IHostEnvironment`, `using Microsoft.Extensions.Hosting;`, and `environment.IsDevelopment()` rely on the hosting abstractions. If your Infrastructure project does not already get them transitively, install `Microsoft.Extensions.Hosting` so the DI example in Section 8 compiles.
 
 Install the EF Core CLI tool globally (if not already):
 
@@ -1270,6 +1272,8 @@ public class SupplierConfiguration : IEntityTypeConfiguration<Supplier>
 ## 8. Register DbContext in DI
 
 Wire EF Core into the DI container. Create a clean extension method:
+
+> **Environment API note:** Use `IHostEnvironment` here. It is the current generic hosting abstraction and works for ASP.NET Core minimal hosting. The older `IHostingEnvironment` type is obsolete. Use `IWebHostEnvironment` only when you specifically need web-root properties such as `WebRootPath`.
 
 **File:** `src/Nastart.Infrastructure/DependencyInjection.cs`
 
