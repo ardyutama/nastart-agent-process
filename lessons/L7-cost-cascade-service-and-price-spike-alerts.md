@@ -286,8 +286,7 @@ public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
 
         // Name must be unique per user
         entity.HasIndex(r => new { r.UserId, r.Name })
-            .IsUnique()
-            .HasDatabaseName("ix_recipes_user_id_name");
+            .IsUnique();
 
         entity.Property(r => r.CostPerPortion)
             .HasPrecision(18, 4);
@@ -306,13 +305,11 @@ public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
         // P0: Index for fetching the latest version in a recipe group (dashboard, cascade).
         // Query pattern: WHERE version_group_id = @id ORDER BY version_number DESC LIMIT 1
         entity.HasIndex(r => new { r.VersionGroupId, r.VersionNumber })
-            .IsDescending(false, true)   // VersionGroupId ASC, VersionNumber DESC
-            .HasDatabaseName("ix_recipes_version_group_number");
+            .IsDescending(false, true);  // VersionGroupId ASC, VersionNumber DESC
 
         // P0: Index for listing all recipe groups belonging to a user (recipe list screen).
         // Query pattern: WHERE user_id = @id GROUP BY version_group_id
-        entity.HasIndex(r => new { r.UserId, r.VersionGroupId })
-            .HasDatabaseName("ix_recipes_user_version_group");
+        entity.HasIndex(r => new { r.UserId, r.VersionGroupId });
 
         // FK to user — cascade delete: deleting the user deletes all their recipes
         entity.HasOne(r => r.User)
@@ -397,8 +394,7 @@ public sealed class RecipeItemConfiguration : IEntityTypeConfiguration<RecipeIte
             .OnDelete(DeleteBehavior.Restrict);
 
         // P0: FK index — PostgreSQL does not auto-create indexes on FK columns
-        entity.HasIndex(ri => ri.IngredientId)
-            .HasDatabaseName("ix_recipe_items_ingredient_id");
+        entity.HasIndex(ri => ri.IngredientId);
     }
 }
 ```
@@ -439,13 +435,11 @@ public sealed class CascadeErrorLogConfiguration : IEntityTypeConfiguration<Casc
         // See XML docs on this class for full rationale.
 
         // Index for querying all errors for a specific ingredient
-        entity.HasIndex(c => c.IngredientId)
-            .HasDatabaseName("ix_cascade_error_logs_ingredient_id");
+        entity.HasIndex(c => c.IngredientId);
 
         // Composite index: error history for a recipe, newest first (audit view)
         entity.HasIndex(c => new { c.RecipeId, c.CreatedAt })
-            .IsDescending(false, true)   // RecipeId ASC, CreatedAt DESC
-            .HasDatabaseName("ix_cascade_error_logs_recipe_created");
+            .IsDescending(false, true);  // RecipeId ASC, CreatedAt DESC
     }
 }
 ```

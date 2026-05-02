@@ -893,7 +893,7 @@ public interface IAppDbContext
 >             .FirstOrDefault()
 >     })
 >     .ToListAsync(ct);
-> // The composite index ix_ingredient_price_history_ingredient_committed covers this exactly.
+> // The composite (ingredient_id, committed_at DESC) index covers this exactly.
 > // C-3 is preserved: current_price is never stored on Ingredient.
 > ```
 
@@ -909,6 +909,8 @@ mkdir -p src/Nastart.Infrastructure/Persistence/Configurations
 
 ### Key configurations (not every entity — just the ones with important constraints)
 
+> **Indexing approach:** Keep indexes simple and tied to real query patterns. Use `HasIndex(...)`, `IsUnique()`, and only the small PostgreSQL-specific calls that matter (for example `IsDescending(false, true)` for latest-row lookups). Let EF Core / Npgsql generate index names unless a future migration needs a legacy name for compatibility.
+
 **File:** `src/Nastart.Infrastructure/Persistence/Configurations/UserConfiguration.cs`
 
 ```csharp
@@ -922,8 +924,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 {
     public void Configure(EntityTypeBuilder<User> builder)
     {
-        builder.HasIndex(u => u.Email).IsUnique()
-            .HasDatabaseName("users_email_idx");
+        builder.HasIndex(u => u.Email).IsUnique();
         builder.Property(u => u.Email).HasMaxLength(255).IsRequired();
         builder.Property(u => u.Name).HasMaxLength(255).IsRequired();
         builder.Property(u => u.PasswordHash).HasMaxLength(255).IsRequired();
@@ -1002,12 +1003,9 @@ public class TelegramLinkConfiguration : IEntityTypeConfiguration<TelegramLink>
                 v => ParseStatus(v)) // safe fallback — logs should surface unexpected values
             .HasMaxLength(20);
 
-        // Index for querying links by user and status (used in linking + deactivation flows)
-        // HasDatabaseName() ensures predictable snake_case index names in migration diffs.
-        builder.HasIndex(t => t.CodeHash).IsUnique()
-            .HasDatabaseName("telegram_links_code_hash_idx");
-        builder.HasIndex(t => new { t.UserId, t.Status })
-            .HasDatabaseName("telegram_links_user_id_status_idx");
+        // Indexes for code lookup and user/status queries in linking + deactivation flows.
+        builder.HasIndex(t => t.CodeHash).IsUnique();
+        builder.HasIndex(t => new { t.UserId, t.Status });
 
         builder.HasOne(t => t.User)
             .WithMany(u => u.TelegramLinks)
@@ -1040,8 +1038,7 @@ public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
     public void Configure(EntityTypeBuilder<Ingredient> builder)
     {
         // Ingredient name is unique within a user's scope
-        builder.HasIndex(i => new { i.UserId, i.Name }).IsUnique()
-            .HasDatabaseName("ingredients_user_id_name_idx");
+        builder.HasIndex(i => new { i.UserId, i.Name }).IsUnique();
 
         builder.Property(i => i.Name).HasMaxLength(255).IsRequired();
         builder.Property(i => i.UnitSize).HasPrecision(10, 4);
@@ -1072,8 +1069,7 @@ public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
 
         // P1: PostgreSQL does NOT auto-create indexes on FK columns.
         // Without this, every JOIN or filter on category_id does a full table scan.
-        builder.HasIndex(i => i.CategoryId)
-            .HasDatabaseName("ingredients_category_id_idx");
+        builder.HasIndex(i => i.CategoryId);
 
         builder.HasOne(i => i.Unit)
             .WithMany()
@@ -1081,8 +1077,7 @@ public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
             .OnDelete(DeleteBehavior.Restrict);
 
         // P1: Index on unit_id — same reason as category_id above.
-        builder.HasIndex(i => i.UnitId)
-            .HasDatabaseName("ingredients_unit_id_idx");
+        builder.HasIndex(i => i.UnitId);
     }
 }
 ```
@@ -1136,8 +1131,7 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
         // Performance: composite index for "get the latest price" pattern
         // Per Flow 02: SELECT ... ORDER BY committed_at DESC LIMIT 1
         builder.HasIndex(p => new { p.IngredientId, p.CommittedAt })
-            .IsDescending(false, true)
-            .HasDatabaseName("ix_ingredient_price_history_ingredient_committed");
+            .IsDescending(false, true);
 
         builder.HasOne(p => p.Ingredient)
             .WithMany(i => i.PriceHistory)
@@ -1154,11 +1148,9 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
         //     .OnDelete(DeleteBehavior.SetNull)
         //     .IsRequired(false);
 
-        // P1: Partial index on the nullable FK — skips the majority of NULL rows,
-        // so Phase 3 invoice lookups remain fast without bloating the index.
-        builder.HasIndex(p => p.InvoiceLineItemId)
-            .HasFilter("invoice_line_item_id IS NOT NULL")
-            .HasDatabaseName("ingredient_price_histories_invoice_line_item_id_idx");
+        // Phase 3: add this partial index only when invoice review queries need it.
+        // builder.HasIndex(p => p.InvoiceLineItemId)
+        //     .HasFilter("invoice_line_item_id IS NOT NULL");
 
     }
 }
@@ -1183,10 +1175,8 @@ public class UnitConfiguration : IEntityTypeConfiguration<Unit>
         builder.Property(u => u.Abbreviation).HasMaxLength(20).IsRequired();
 
         // Uniqueness enforced at the DB level to support idempotent seed scripts.
-        builder.HasIndex(u => u.Name).IsUnique()
-            .HasDatabaseName("units_name_idx");
-        builder.HasIndex(u => u.Abbreviation).IsUnique()
-            .HasDatabaseName("units_abbreviation_idx");
+        builder.HasIndex(u => u.Name).IsUnique();
+        builder.HasIndex(u => u.Abbreviation).IsUnique();
     }
 }
 ```
@@ -1207,8 +1197,7 @@ public class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.Property(c => c.Name).HasMaxLength(255).IsRequired();
 
         // Category name is unique within a user's scope
-        builder.HasIndex(c => new { c.UserId, c.Name }).IsUnique()
-            .HasDatabaseName("categories_user_id_name_idx");
+        builder.HasIndex(c => new { c.UserId, c.Name }).IsUnique();
 
         builder.HasOne(c => c.User)
             .WithMany()
