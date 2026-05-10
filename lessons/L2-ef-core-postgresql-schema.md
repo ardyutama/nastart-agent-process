@@ -2,7 +2,7 @@
 
 > **What you'll learn:**
 > - What Entity Framework Core is and how code-first works
-> - How to model 7 domain entities as C# classes (v1 solopreneur scope)
+> - How to model the 6 Phase 1 domain entities as C# classes (v1 solopreneur scope)
 > - How to configure relationships, constraints, and indexes with Fluent API
 > - How to run your first migration and create real database tables
 > - Docker Compose for local PostgreSQL
@@ -23,10 +23,13 @@
 > **Change these:**
 > - `Ingredient`: replace `Guid OutletId` with `Guid UserId` (FK → `User.Id`). Update the unique index from `(OutletId, Name)` to `(UserId, Name)`.
 > - `Recipe` (introduced in L7): replace `Guid OutletId` with `Guid UserId`. Remove `SellingPrice`. Remove `CostThresholdPercentage`. Add `decimal PackagingCost` (default 0) and `decimal TargetMargin` (default 0).
-> - `DbSet` registrations: only register the 7 entities below. Remove all 5 enterprise entities.
+> - `DbSet` registrations: in this lesson, register only the 6 Phase 1 entities below. Remove all 5 enterprise entities.
 >
-> **v1 entity list (build these only):**
-> `User`, `TelegramLink`, `Ingredient`, `IngredientPriceHistory`, `Unit`, `Category`, `Recipe`, `RecipeItem`, `CascadeErrorLog`
+> **v1 Phase 1 entity list (build these in this lesson):**
+> `User`, `TelegramLink`, `Ingredient`, `IngredientPriceHistory`, `Unit`, `Category`
+>
+> **Later v1 entities:**
+> `Recipe`, `RecipeItem`, and `CascadeErrorLog` are introduced in L7. Do not add them in L2; the classes do not exist yet.
 >
 > **Keep as-is:**
 > - `TelegramLinkStatus` enum — still needed for personal Telegram cost alerts
@@ -293,13 +296,15 @@ public enum PriceSource
 }
 ```
 
+> ⚠️ **Phase 3 only — do not build in L2.** Invoice scanning is introduced later, after the receipt/OCR flow exists.
+
 **File:** `src/Nastart.Domain/Enums/InvoiceStatus.cs`
 
 ```csharp
 namespace Nastart.Domain.Enums;
 
-// Forward-declared for Phase 3 — Invoice entity references this in L2
-// but invoice processing logic is built in L12–L14
+// Phase 3 only — do not create this enum in L2.
+// Add it when invoice entities are introduced with the OCR/review flow.
 public enum InvoiceStatus
 {
     Processing,
@@ -311,7 +316,7 @@ public enum InvoiceStatus
 
 ---
 
-## 4. Domain Entities — 9 v1 Entities (Phase 1)
+## 4. Domain Entities — 6 v1 Phase 1 Entities
 
 Each entity inherits from `BaseEntity` (created in L1). All live in `src/Nastart.Domain/Entities/`.
 
@@ -375,20 +380,18 @@ using Nastart.Domain.Common;
 // All Telegram identity lives on TelegramLink only.
 public class User : BaseEntity
 {
-    public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     // MUST use a slow adaptive hashing algorithm — BCrypt (BCrypt.Net-Next) or ASP.NET Core
     // PasswordHasher<T>. NEVER store plaintext or use fast hashes (MD5, SHA-*). See L5. (OWASP A02)
     public string PasswordHash { get; set; } = string.Empty;
-    public bool IsVerified { get; set; }
-    public bool IsActive { get; set; }
+    public bool IsEmailVerified { get; set; }
 
     // Navigation
     // v2-only: OutletUsers removed — no OutletUser entity in v1
     public ICollection<TelegramLink> TelegramLinks { get; set; } = [];
     public ICollection<Ingredient> Ingredients { get; set; } = [];
-    // Added when Recipe entity is introduced in L7 — inverse nav for RecipeConfiguration.WithMany()
-    public ICollection<Recipe> Recipes { get; set; } = [];
+    // Added in L7 after Recipe exists:
+    // public ICollection<Recipe> Recipes { get; set; } = [];
 }
 ```
 
@@ -518,6 +521,12 @@ public class Unit : BaseEntity
 > `Unit` has no `UserId`. This makes units a shared system catalogue (e.g., "kg", "L", "piece") seeded at startup and shared by all users. In v1 (single user), this is functionally equivalent to user-scoped.
 > In v2, if users need custom units, add a nullable `UserId` column with a partial unique index: `(name) WHERE user_id IS NULL` for system units and `(user_id, name)` for user-defined units.
 > **v1 action required:** Seed the standard unit catalogue in a migration or startup service.
+>
+> Lessons L3-L8 use these stable local-dev IDs in copy/paste commands:
+> - `b0000000-0000-0000-0000-000000000001` — kilogram / kg
+> - `b0000000-0000-0000-0000-000000000002` — gram / g
+> - `b0000000-0000-0000-0000-000000000003` — litre / L
+> - `b0000000-0000-0000-0000-000000000004` — piece / pc
 
 ### Category
 
@@ -675,7 +684,7 @@ Ingredient.cs     →    ingredients
 
 The `AppDbContext` is your gateway to the database. It lives in Infrastructure:
 
-> ⚠️ **v2-only — omit enterprise DbSets above.** AppDbContext registers only the 9 entities below.
+> ⚠️ **v2-only — omit enterprise DbSets above.** AppDbContext registers only the 6 Phase 1 entities below.
 
 **File:** `src/Nastart.Infrastructure/Persistence/AppDbContext.cs`
 
@@ -926,7 +935,6 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
     {
         builder.HasIndex(u => u.Email).IsUnique();
         builder.Property(u => u.Email).HasMaxLength(255).IsRequired();
-        builder.Property(u => u.Name).HasMaxLength(255).IsRequired();
         builder.Property(u => u.PasswordHash).HasMaxLength(255).IsRequired();
     }
 }
@@ -1370,7 +1378,7 @@ dotnet ef database update \
 
 ```bash
 # Connect to PostgreSQL and list tables
-docker exec -it $(docker compose ps -q postgres) psql -U dev -d recipe_cost_dev -c "\dt"
+docker compose exec -T postgres psql -U dev -d recipe_cost_dev -c "\dt"
 ```
 
 You should see tables for: users, telegram_links, ingredients, ingredient_price_histories, units, categories.
@@ -1450,19 +1458,34 @@ dotnet ef database update \
 
 # 4. Tables exist in PostgreSQL
 #    Opens a psql shell inside the running container and runs "\dt" to list tables
-docker exec -it $(docker compose ps -q postgres) psql -U dev -d recipe_cost_dev -c "\dt"
+docker compose exec -T postgres psql -U dev -d recipe_cost_dev -c "\dt"
 # Should show 6 tables (plus __EFMigrationsHistory)
 # Recipe, RecipeItem, CascadeErrorLog are added in L7
 
-# 5. API runs
+# 5. Seed the shared unit catalogue used by later lessons
+docker compose exec -T postgres psql -U dev -d recipe_cost_dev -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO units (id, name, abbreviation, created_at, updated_at)
+VALUES
+    ('b0000000-0000-0000-0000-000000000001', 'kilogram', 'kg', NOW(), NOW()),
+    ('b0000000-0000-0000-0000-000000000002', 'gram', 'g', NOW(), NOW()),
+    ('b0000000-0000-0000-0000-000000000003', 'litre', 'L', NOW(), NOW()),
+    ('b0000000-0000-0000-0000-000000000004', 'piece', 'pc', NOW(), NOW())
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    abbreviation = EXCLUDED.abbreviation,
+    updated_at = NOW();
+SQL
+
+# 6. API runs
 dotnet run --project src/Nastart.API
 # curl http://localhost:5000/health → {"status":"healthy"}
 ```
 
 ### What we built in this lesson
 
-- 5 enums (Role, TelegramLinkStatus, InvitationStatus, PriceSource, InvoiceStatus)
-- 6 entity classes in Domain/ (Recipe, RecipeItem, CascadeErrorLog built in L7)
+- 2 v1 enums: `TelegramLinkStatus`, `PriceSource`
+- 6 Phase 1 entity classes in Domain/: `User`, `TelegramLink`, `Ingredient`, `IngredientPriceHistory`, `Unit`, `Category`
+- `Recipe`, `RecipeItem`, and `CascadeErrorLog` are intentionally deferred until L7
 - 7 Fluent API configurations with constraints, indexes, and relationships (added UnitConfiguration)
 - AppDbContext with automatic CreatedAt/UpdatedAt on both sync and async paths
 - IAppDbContext interface in Application (v1 entities only; L7 adds Recipe/RecipeItem/CascadeErrorLog)

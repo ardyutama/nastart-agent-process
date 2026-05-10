@@ -224,9 +224,9 @@ public record GetIngredientByIdResponse(
     UnitDto Unit,
     CategoryDto? Category,
     decimal UnitSize,
-    decimal PriceSpikeThresholdPct,
+    decimal? PriceSpikeThresholdPct,
     decimal? CurrentPrice,
-    DateTime? LastPriceDate
+    DateTimeOffset? LastPriceDate
 );
 ```
 
@@ -308,7 +308,7 @@ public record CreateIngredientCommand(
     Guid UnitId,
     Guid? CategoryId,
     decimal UnitSize,
-    decimal PriceSpikeThresholdPct,
+    decimal? PriceSpikeThresholdPct = null,
     decimal? InitialPrice = null,
     DateOnly? InitialEffectiveDate = null
 ) : IRequest<ErrorOr<CreateIngredientResponse>>;
@@ -350,8 +350,9 @@ public class CreateIngredientCommandValidator : AbstractValidator<CreateIngredie
 
         RuleFor(x => x.PriceSpikeThresholdPct)
             .InclusiveBetween(0, 100)
+            .When(x => x.PriceSpikeThresholdPct.HasValue)
             .WithMessage("Spike threshold must be between 0 and 100.");
-        // 0 is valid: means "no spike alerting". Alert logic is wired in L7.
+        // null or 0 means "no spike alerting". Alert logic is wired in L7.
 
         RuleFor(x => x.InitialPrice)
             .GreaterThan(0).When(x => x.InitialPrice.HasValue)
@@ -394,7 +395,8 @@ public class CreateIngredientHandler(IAppDbContext db)
         if (command.CategoryId.HasValue)
         {
             var categoryExists = await db.Categories
-                .AnyAsync(c => c.Id == command.CategoryId.Value, ct);
+                .AnyAsync(c => c.Id == command.CategoryId.Value
+                            && c.UserId == command.UserId, ct);
             if (!categoryExists)
                 return Error.NotFound("Category.NotFound", "The specified category does not exist.");
         }
@@ -422,7 +424,7 @@ public class CreateIngredientHandler(IAppDbContext db)
 
         // If initial price provided, create the first price history record
         // C-3: Current price always comes from latest PriceHistory record
-        // C-4: CommittedAt is NOT set here — the DB inserts NOW() via HasDefaultValueSql
+        // C-4: Set CommittedAt in the handler; DB default is a safety net only.
         // C-5: IngredientPriceHistory is append-only — never update or delete
         // C-13: Source = PriceSource.Manual; EF Core stores this as the string "Manual"
         //        via .HasConversion<string>() in IngredientPriceHistoryConfiguration (see L2)
@@ -438,8 +440,8 @@ public class CreateIngredientHandler(IAppDbContext db)
                 // The cost formula (C-2) uses each record's own UnitSize for accurate historical costing.
                 UnitSize = command.UnitSize,
                 Source = PriceSource.Manual,
+                CommittedAt = DateTimeOffset.UtcNow,
                 EffectiveDate = command.InitialEffectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow),
-                // CommittedAt: NOT set — DB default handles this via HasDefaultValueSql("NOW()")
                 InvoiceLineItemId = null
             };
 
@@ -482,7 +484,7 @@ public record UpdateIngredientCommand(
     Guid UnitId,
     Guid? CategoryId,
     decimal UnitSize,
-    decimal PriceSpikeThresholdPct
+    decimal? PriceSpikeThresholdPct = null
 ) : IRequest<ErrorOr<UpdateIngredientResponse>>;
 ```
 
@@ -523,6 +525,7 @@ public class UpdateIngredientCommandValidator : AbstractValidator<UpdateIngredie
 
         RuleFor(x => x.PriceSpikeThresholdPct)
             .InclusiveBetween(0, 100)
+            .When(x => x.PriceSpikeThresholdPct.HasValue)
             .WithMessage("Spike threshold must be between 0 and 100.");
     }
 }
@@ -575,7 +578,8 @@ public class UpdateIngredientHandler(IAppDbContext db)
         if (command.CategoryId.HasValue)
         {
             var categoryExists = await db.Categories
-                .AnyAsync(c => c.Id == command.CategoryId.Value, ct);
+                .AnyAsync(c => c.Id == command.CategoryId.Value
+                            && c.UserId == command.UserId, ct);
             if (!categoryExists)
                 return Error.NotFound("Category.NotFound", "The specified category does not exist.");
         }
@@ -729,7 +733,7 @@ public record AddIngredientPriceResponse(
     Guid IngredientId,
     decimal Price,
     DateOnly EffectiveDate,
-    DateTime CommittedAt  // DB-generated — reflects the actual INSERT timestamp
+    DateTimeOffset CommittedAt
 );
 ```
 
@@ -791,7 +795,7 @@ public class AddIngredientPriceHandler(IAppDbContext db)
         var effectiveDate = command.EffectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
 
         // C-5: Append-only — never update existing records
-        // C-4: CommittedAt is NOT set here; the DB sets it via HasDefaultValueSql("NOW()")
+        // C-4: Set CommittedAt in the handler; the DB default is a safety net only.
         // C-13: PriceSource.Manual stored as the string "Manual" via .HasConversion<string>() (L2)
         // C-3 + C-4: Snapshot UnitSize at the time of this price entry.
         //   If the ingredient's unit size is later changed, this record retains the original size.
@@ -803,16 +807,13 @@ public class AddIngredientPriceHandler(IAppDbContext db)
             Price = command.Price,
             UnitSize = ingredient.UnitSize,
             Source = PriceSource.Manual,
+            CommittedAt = DateTimeOffset.UtcNow,
             EffectiveDate = effectiveDate,
             InvoiceLineItemId = null
-            // CommittedAt: NOT set — DB default inserts NOW()
         };
 
         db.IngredientPriceHistories.Add(priceRecord);
         await db.SaveChangesAsync(ct);
-
-        // EF Core refreshes ValueGeneratedOnAdd properties after SaveChangesAsync.
-        // priceRecord.CommittedAt now contains the actual DB-inserted timestamp from HasDefaultValueSql.
 
         // TODO (L7): After price is committed, wire:
         // 1. ICostCascadeService.RecalculateForIngredient(command.IngredientId)
@@ -867,7 +868,7 @@ public record PriceHistoryEntry(
     Guid Id,
     decimal Price,
     string Source,      // "Manual" or "InvoiceScan" (Phase 3)
-    DateTime CommittedAt,
+    DateTimeOffset CommittedAt,
     DateOnly EffectiveDate
 );
 
@@ -1081,7 +1082,7 @@ app.Run();
 **Before running:** ensure `app.MapIngredientEndpoints()` is in `Program.cs`, then:
 
 ```bash
-docker-compose up -d   # Start PostgreSQL
+docker compose up -d   # Start PostgreSQL
 dotnet run --project src/Nastart.API
 ```
 
@@ -1092,7 +1093,7 @@ dotnet run --project src/Nastart.API
 
 curl -X POST http://localhost:5000/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"name": "Jane Chef", "email": "jane@test.com", "password": "password123"}'
+  -d '{"email": "jane@test.com", "password": "password123"}'
 # Expected: 201 { "userId": "...", "message": "Check your email..." }
 
 USERID="<userId-from-register>"
@@ -1108,9 +1109,10 @@ curl -X POST http://localhost:5000/api/auth/login \
 
 TOKEN="<token-from-login>"
 
-# --- Pre-seed: Units and Categories must exist (from L2 seed data) ---
-UNITID="87654321-abcd-1234-5678-abcdef000001"     # kilogram / kg
-CATEGORYID="76543210-bcde-2345-6789-bcdef0000002"  # Proteins
+# --- Pre-seed: Units must exist (from L2 seed data) ---
+# Categories are user-scoped. Omit categoryId in the baseline test,
+# or create/seed a category for this USERID before including one.
+UNITID="b0000000-0000-0000-0000-000000000001"     # kilogram / kg
 
 # --- TEST 1: Create an ingredient with initial price ---
 
@@ -1120,7 +1122,6 @@ curl -X POST http://localhost:5000/api/ingredients \
   -d "{
     \"name\": \"Chicken Breast\",
     \"unitId\": \"$UNITID\",
-    \"categoryId\": \"$CATEGORYID\",
     \"unitSize\": 1.0,
     \"priceSpikeThresholdPct\": 10,
     \"initialPrice\": 5.50,
@@ -1148,7 +1149,7 @@ curl -X GET "http://localhost:5000/api/ingredients/$INGREDIENTID" \
 # Expected: 200 {
 #   "id": "...", "name": "Chicken Breast",
 #   "unit": { "id": "...", "name": "kilogram", "abbreviation": "kg" },
-#   "category": { "id": "...", "name": "Proteins" },
+#   "category": null,
 #   "unitSize": 1.0, "priceSpikeThresholdPct": 10,
 #   "currentPrice": 5.50, "lastPriceDate": "2024-01-..."
 # }
@@ -1161,7 +1162,6 @@ curl -X PUT "http://localhost:5000/api/ingredients/$INGREDIENTID" \
   -d "{
     \"name\": \"Organic Chicken Breast\",
     \"unitId\": \"$UNITID\",
-    \"categoryId\": \"$CATEGORYID\",
     \"unitSize\": 1.0,
     \"priceSpikeThresholdPct\": 15
   }"
@@ -1292,7 +1292,7 @@ curl -X GET "http://localhost:5000/api/ingredients"
 ### Key Canonical Decisions Wired
 
 - **C-3** — Current price always derived from `ORDER BY committed_at DESC LIMIT 1`
-- **C-4** — `CommittedAt` is DB-generated via `HasDefaultValueSql`; `EffectiveDate` is user-supplied
+- **C-4** — `CommittedAt` is set by the handler for ordering; `HasDefaultValueSql("NOW()")` is a DB safety net; `EffectiveDate` is user-supplied
 - **C-5** — `IngredientPriceHistory` is append-only; records are never updated or deleted
 - **C-13** — `PriceSource.Manual` stored as the string `"Manual"` via `.HasConversion<string>()` (L2)
 - **C-8 (v2-only)** — Role-based endpoint policies are deferred to v2; all endpoints use `.RequireAuthorization()` with no policy name

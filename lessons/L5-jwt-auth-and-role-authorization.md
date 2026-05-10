@@ -120,15 +120,12 @@ dotnet add src/Nastart.Infrastructure package BCrypt.Net-Next
 
 ## 3. JWT Configuration
 
-Add JWT settings to `appsettings.json`:
+Keep the L2 connection-string setup unchanged. Add only the JWT settings to `appsettings.json`:
 
 **File:** `src/Nastart.API/appsettings.json`
 
 ```json
 {
-  "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Port=5432;Database=recipe_cost_dev;Username=dev;Password=dev_password"
-  },
   "Jwt": {
     "Issuer": "Nastart.API",
     "Audience": "Nastart.Client"
@@ -181,7 +178,6 @@ using MediatR;
 namespace Nastart.Application.Features.Auth.Commands.Register;
 
 public record RegisterCommand(
-    string Name,
     string Email,
     string Password
 ) : IRequest<ErrorOr<RegisterResponse>>;
@@ -206,9 +202,6 @@ public class RegisterCommandValidator : AbstractValidator<RegisterCommand>
 {
     public RegisterCommandValidator()
     {
-        RuleFor(x => x.Name)
-            .NotEmpty().MaximumLength(255);
-
         RuleFor(x => x.Email)
             .NotEmpty().EmailAddress().MaximumLength(255);
 
@@ -293,15 +286,13 @@ public class RegisterHandler(
         if (emailTaken)
             return Error.Conflict("User.EmailTaken", "An account with this email already exists.");
 
-        // Flow 01 Step 3: create user with isVerified=false, isActive=false
+        // Flow 01 Step 3: create user with isEmailVerified=false
         var user = new User
         {
             Id = Guid.NewGuid(),
-            Name = command.Name,
             Email = command.Email.ToLowerInvariant(),
             PasswordHash = hasher.Hash(command.Password),
-            IsVerified = false,
-            IsActive = false
+            IsEmailVerified = false
         };
 
         db.Users.Add(user);
@@ -366,8 +357,8 @@ public class JwtTokenService(IConfiguration config) : ITokenService
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId.ToString()),
-            new(ClaimTypes.Email, email)
+            new(JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new(JwtRegisteredClaimNames.Email, email)
         };
         // Token expiry: set to 24 hours
         var expires = DateTime.UtcNow.AddHours(24);
@@ -472,14 +463,9 @@ public class LoginHandler(
         if (!hasher.Verify(command.Password, user.PasswordHash))
             return Error.Unauthorized("Auth.InvalidCredentials", "Invalid email or password.");
 
-        // flow 01 step 7 guard: must be verified AND active before issuing JWT
-        // Security: use IDENTICAL error codes and messages for both guards.
-        // Revealing WHICH check failed (not verified vs deactivated) is a user
-        // enumeration risk — attackers could probe account state via different error text.
-        if (!user.IsVerified)
-            return Error.Unauthorized("Auth.InvalidCredentials", "Invalid email or password.");
-
-        if (!user.IsActive)
+        // Flow 01 Step 7 guard: must be verified before issuing JWT.
+        // Security: use the same error code/message as invalid credentials.
+        if (!user.IsEmailVerified)
             return Error.Unauthorized("Auth.InvalidCredentials", "Invalid email or password.");
 
         var token = tokenService.GenerateToken(user.Id, user.Email);
@@ -507,7 +493,8 @@ public static class AuthEndpoints
     public static void MapAuthEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/auth")
-            .WithTags("Authentication");
+            .WithTags("Authentication")
+            .AllowAnonymous();
 
         // Public — no auth required
         group.MapPost("/register", async (RegisterCommand command, ISender sender, CancellationToken ct) =>
@@ -538,6 +525,7 @@ public static class AuthEndpoints
 
 ```csharp
 using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Nastart.Application;
@@ -573,7 +561,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
 
 var app = builder.Build();
 
@@ -584,7 +577,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // Public endpoints
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }))
+    .AllowAnonymous();
 app.MapAuthEndpoints();
 
 // Protected endpoints — require authentication
@@ -606,6 +600,7 @@ Update existing endpoints to require authentication. Also add the helper to extr
 
 ```csharp
 using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace Nastart.API.Extensions;
 
@@ -614,6 +609,7 @@ public static class ClaimsPrincipalExtensions
     public static Guid GetUserId(this ClaimsPrincipal principal)
     {
         var value = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub)
             ?? throw new UnauthorizedAccessException("userId claim missing from token.");
         return Guid.Parse(value);
     }
@@ -621,6 +617,7 @@ public static class ClaimsPrincipalExtensions
     public static string GetEmail(this ClaimsPrincipal user)
     {
         return user.FindFirstValue(ClaimTypes.Email)
+            ?? user.FindFirstValue(JwtRegisteredClaimNames.Email)
             ?? throw new InvalidOperationException("Email claim not found.");
     }
 
@@ -688,7 +685,7 @@ var group = app.MapGroup("/api/ingredients")
 
 Some endpoints are restricted to specific roles. Use authorization policies:
 
-Add to `Program.cs` (after `AddAuthorization()`):
+This was configured in Section 7 with a fallback policy:
 
 ```csharp
 // v1: fallback policy — all authenticated users have the same access
@@ -837,12 +834,11 @@ public class VerifyEmailHandler(IAppDbContext db)
         if (user is null)
             return Error.NotFound("User.NotFound", "User not found.");
 
-        if (user.IsVerified)
+        if (user.IsEmailVerified)
             return Error.Conflict("User.AlreadyVerified", "Email is already verified.");
 
-        // Flow 01 Step 6: set isVerified=true, isActive=true
-        user.IsVerified = true;
-        user.IsActive = true;
+        // Flow 01 Step 6: set isEmailVerified=true
+        user.IsEmailVerified = true;
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -984,7 +980,7 @@ dotnet run --project src/Nastart.API
 # Step 1: Register
 curl -X POST http://localhost:5000/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"name": "John Owner", "email": "john@test.com", "password": "password123"}'
+  -d '{"email": "john@test.com", "password": "password123"}'
 # Expected: 201 {"userId":"...", "message":"Check your email to verify your account."}
 # Check console output — you should see the verification email logged
 
@@ -1005,22 +1001,16 @@ curl -X POST http://localhost:5000/api/auth/login \
 curl http://localhost:5000/api/ingredients
 # Expected: 401 Unauthorized (no token provided)
 
-# Step 5: Login and use the JWT
-curl -X POST http://localhost:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "password": "your_password"}'
-# Expected: 200 OK with {"token":"eyJh..."}
-
-# Step 6: Use the token to access ingredients
-TOKEN="eyJh..."  # paste the token from step 5
+# Step 5: Use the token from Step 3 to access ingredients
+TOKEN="eyJh..."  # paste the token from step 3
 curl http://localhost:5000/api/ingredients \
   -H "Authorization: Bearer $TOKEN"
 # Expected: 200 OK with [] (empty list)
 
-# Step 7: Test login guard — try logging in before verification
+# Step 6: Test login guard — try logging in before verification
 curl -X POST http://localhost:5000/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"name": "Unverified User", "email": "unverified@test.com", "password": "password123"}'
+  -d '{"email": "unverified@test.com", "password": "password123"}'
 
 curl -X POST http://localhost:5000/api/auth/login \
   -H "Content-Type: application/json" \

@@ -575,14 +575,22 @@ dotnet run --project src/Nastart.API
 curl http://localhost:5000/health
 # Expected: {"status":"healthy"}
 
-# 4. Insert a test user directly (v1 User columns: id, email, password_hash, is_email_verified, created_at, updated_at)
-docker exec -it $(docker compose ps -q postgres) psql -U dev -d recipe_cost_dev -c \
-  "INSERT INTO users (id, email, password_hash, is_email_verified, created_at, updated_at) VALUES \
-  ('c0000000-0000-0000-0000-000000000001', 'test@example.com', 'placeholder', false, NOW(), NOW());"
+# 4. Optional: seed the same test user ID used by the hardcoded L3 endpoint
+#    The GET below returns [] even without this row because it only filters ingredients by user_id.
+#    Seeding it now makes the same ID available for L4 POST/FK checks.
+docker compose exec -T postgres psql -U dev -d recipe_cost_dev -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO users (id, email, password_hash, is_email_verified, created_at, updated_at)
+VALUES ('c0000000-0000-0000-0000-000000000001', 'test@example.com', 'placeholder', false, NOW(), NOW())
+ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    password_hash = EXCLUDED.password_hash,
+    is_email_verified = EXCLUDED.is_email_verified,
+    updated_at = NOW();
+SQL
 
 # 5. Test the ingredients endpoint
 # Auth is added in L5. The endpoint currently uses a hardcoded test userId
-# (c0000000-0000-0000-0000-000000000001). Make sure the INSERT above ran first.
+# (c0000000-0000-0000-0000-000000000001).
 curl http://localhost:5000/api/ingredients
 # Expected: 200 OK with an empty array []
 # This confirms: endpoint → ISender → GetIngredientsHandler → DB → response

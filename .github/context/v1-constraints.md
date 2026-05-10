@@ -44,7 +44,7 @@ Ingredient {
   CategoryId            UUID FK → Category.Id nullable
   UnitId                UUID FK → Unit.Id NOT NULL
   UnitSize              decimal(10,4) NOT NULL
-  PriceSpikeThreshold   decimal(5,2) nullable
+  PriceSpikeThresholdPct decimal(5,2) nullable
   CreatedAt / UpdatedAt timestamptz
   UNIQUE(UserId, Name)
 }
@@ -53,6 +53,7 @@ IngredientPriceHistory {
   Id            UUID PK
   IngredientId  UUID FK → Ingredient.Id
   Price         decimal(10,4) NOT NULL
+  UnitSize      decimal(10,4) NOT NULL                    ← package-size snapshot for this price row
   Source        enum('Manual','InvoiceScan') NOT NULL   ← C-13: case-sensitive
   CommittedAt   timestamptz NOT NULL DEFAULT NOW()      ← C-4: system timestamp, ordering field
   EffectiveDate date NOT NULL                           ← C-4: user-editable business date

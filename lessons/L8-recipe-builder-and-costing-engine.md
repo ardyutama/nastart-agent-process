@@ -9,21 +9,13 @@
 >
 > **Out of scope for this lesson:**
 > - **Async/deferred cascade** — Phase 4+. Currently cascade runs synchronously. Future: queue-based async with retries.
-> - **Telegram threshold alerts** — deferred to L15. CostCascadeService dispatches alerts; how the bot receives them is Phase 4.
+> - **Telegram threshold alerts** — deferred to L15. L7 handles price-spike detection through `IPriceSpikeChecker`; Telegram delivery is Phase 4.
 
-> **Prerequisites — L7 Decision A (UnitSizeSnapshot)**
+> **Prerequisites — L7 price-history unit-size snapshot**
 >
-> L7 commits **Decision A**: every `RecipeItem` carries a `UnitSizeSnapshot` column that captures
-> `Ingredient.UnitSize` at item-creation time. The C-2 cost formula uses this snapshot
-> (`item.UnitSizeSnapshot`) rather than the live `Ingredient.UnitSize`, so a package-size change
-> on an ingredient cannot silently reprice existing recipes.
->
-> A DB check constraint enforces `unit_size_snapshot > 0`. Any handler in this lesson that
-> creates a `RecipeItem` **must** populate `UnitSizeSnapshot` from the ingredient's current
-> `UnitSize` at the time of creation. Three handlers are affected:
-> - `CreateRecipeHandler` — Section 3
-> - `AddRecipeItemHandler` — Section 6
-> - `CreateRecipeVersionHandler` (item copy) — Section 8
+> L7 keeps the package-size snapshot on `IngredientPriceHistory.UnitSize`, not `RecipeItem`.
+> Recipe handlers only store ingredient ID, quantity, and yield. The cascade service fetches
+> the latest committed price row and uses that row's `UnitSize` in C-2.
 
 > ⚠️ **v1 Solopreneur Amendments (April 9, 2026)**
 >
@@ -86,7 +78,7 @@
 
 ## 1. Why CostPerPortion is Server-Authoritative
 
-Imagine a Vue.js client receives a Recipe with `CostPerPortion = $5.00`. The user sees a form with editable fields: Name, SellingPrice, RecipeItems. 
+Imagine a Vue.js client receives a Recipe with `CostPerPortion = $5.00`. The user sees a form with editable fields: Name, SellingPrice, RecipeItems.
 
 **Question: What if the client computes `CostPerPortion` and sends it back in the PUT request?**
 
@@ -110,7 +102,7 @@ Client sends:
 
 Server:
   1. Persists recipe and items
-  2. Calls ICostCascadeService.RecalculateForIngredient() for each ingredient
+    2. Calls ICostCascadeService.RecalculateForIngredientAsync(ingredientId, ct) for each ingredient
   3. Cascade fetches CURRENT prices from IngredientPriceHistory (C-3)
   4. Applies formula (C-2) → NEW cost_per_portion
   5. Updates Recipe.CostPerPortion in database
@@ -337,16 +329,15 @@ public sealed class CreateRecipeHandler(IAppDbContext db, ICostCascadeService ca
             return Error.Conflict("Recipe.Duplicate",
                 "A recipe with this name already exists.");
 
-        // Business rule: All ingredients must belong to this user AND we need their UnitSize
-        // values to populate RecipeItem.UnitSizeSnapshot (L7 Decision A).
+        // Business rule: All ingredients must belong to this user.
         var ingredientIds = command.RecipeItems.Select(r => r.IngredientId).Distinct().ToList();
-        var ingredientSizes = await db.Ingredients
+        var existingIngredientIds = await db.Ingredients
             .Where(i => i.UserId == command.UserId && ingredientIds.Contains(i.Id))
-            .Select(i => new { i.Id, i.UnitSize })
-            .ToDictionaryAsync(i => i.Id, i => i.UnitSize, ct)
+            .Select(i => i.Id)
+            .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        if (ingredientSizes.Count != ingredientIds.Count)
+        if (existingIngredientIds.Count != ingredientIds.Count)
             return Error.NotFound("Ingredient.NotFound",
                 "One or more ingredients do not belong to this user or do not exist.");
 
@@ -369,18 +360,14 @@ public sealed class CreateRecipeHandler(IAppDbContext db, ICostCascadeService ca
 
         db.Recipes.Add(recipe);
 
-        // Create all RecipeItems
-        // UnitSizeSnapshot: captured from ingredient.UnitSize at creation time (L7 Decision A).
-        // CostCascadeService uses this snapshot in the C-2 formula rather than the live
-        // Ingredient.UnitSize, preventing silent repricing if the package size changes later.
+        // Create all RecipeItems. Package size remains on IngredientPriceHistory.UnitSize.
         var recipeItems = command.RecipeItems.Select(r => new RecipeItem
         {
             Id = Guid.NewGuid(),
             RecipeId = recipe.Id,
             IngredientId = r.IngredientId,
             Quantity = r.Quantity,
-            YieldPercentage = r.YieldPercentage,
-            UnitSizeSnapshot = ingredientSizes[r.IngredientId]  // Decision A
+            YieldPercentage = r.YieldPercentage
         }).ToList();
 
         foreach (var item in recipeItems)
@@ -783,17 +770,14 @@ public sealed class AddRecipeItemHandler(IAppDbContext db, ICostCascadeService c
             return Error.Conflict("RecipeItem.Duplicate",
                 "This ingredient is already in the recipe. Use UpdateRecipeItem to change quantity.");
 
-        // Create and add RecipeItem
-        // UnitSizeSnapshot: ingredient entity already loaded above for access control —
-        // capture UnitSize now (L7 Decision A: snapshot prevents silent repricing on unit change)
+        // Create and add RecipeItem. Package size is read from IngredientPriceHistory during cascade.
         var recipeItem = new RecipeItem
         {
             Id = Guid.NewGuid(),
             RecipeId = command.RecipeId,
             IngredientId = command.IngredientId,
             Quantity = command.Quantity,
-            YieldPercentage = command.YieldPercentage,
-            UnitSizeSnapshot = ingredient.UnitSize    // Decision A
+            YieldPercentage = command.YieldPercentage
         };
 
         db.RecipeItems.Add(recipeItem);
@@ -1017,17 +1001,14 @@ public sealed class CreateRecipeVersionHandler(IAppDbContext db, ICostCascadeSer
 
         db.Recipes.Add(newRecipe);
 
-        // Copy all RecipeItems verbatim from source
-        // UnitSizeSnapshot: copy the snapshot from the source item — the unit size
-        // at item-creation time is preserved across versions (L7 Decision A).
+        // Copy all RecipeItems verbatim from source.
         var copiedItems = sourceRecipe.RecipeItems.Select(ri => new RecipeItem
         {
             Id = Guid.NewGuid(),
             RecipeId = newRecipe.Id,
             IngredientId = ri.IngredientId,
             Quantity = ri.Quantity,
-            YieldPercentage = ri.YieldPercentage,
-            UnitSizeSnapshot = ri.UnitSizeSnapshot  // Decision A: preserve snapshot from source item
+            YieldPercentage = ri.YieldPercentage
         }).ToList();
 
         foreach (var item in copiedItems)
@@ -1069,7 +1050,7 @@ public sealed class CreateRecipeVersionHandler(IAppDbContext db, ICostCascadeSer
 
 ## 9. Feature Slice 7 — UpdateRecipe
 
-Updates recipe metadata (name, portion count, selling price, threshold). Triggers cascade if PortionCount changes.
+Updates recipe metadata (name, portion count, packaging cost, target margin, version label). Triggers cascade if PortionCount changes.
 
 ### Folder structure
 
@@ -1417,7 +1398,7 @@ public static class RecipeEndpoints
         var command = new CreateRecipeVersionCommand(recipeId, userId, request.VersionLabel);
         var result = await sender.Send(command, ct);
 
-        return result.ToApiResult();
+        return result.ToCreatedResult($"/api/recipes/{result.Value?.NewRecipeId}");
     }
 }
 ```
@@ -1427,10 +1408,7 @@ public static class RecipeEndpoints
 Update `src/Nastart.API/Program.cs` to keep authorization enabled and map the recipe endpoints:
 
 ```csharp
-// After builder.Services.AddAuthorization():
-builder.Services.AddAuthorization();
-
-// Register endpoint handler:
+// Keep the L5 authorization setup in place, then register endpoint handler:
 app.MapRecipeEndpoints();
 ```
 
@@ -1459,8 +1437,8 @@ Assume the API is running with `.MapRecipeEndpoints()` registered. You're logged
 ```bash
 TOKEN="<your-jwt-from-login>"
 
-# List your recipes
-curl -X GET "http://localhost:5000/api/recipes" \
+# List your ingredients from L6
+curl -X GET "http://localhost:5000/api/ingredients" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -1469,7 +1447,7 @@ curl -X GET "http://localhost:5000/api/recipes" \
 First, verify you have ingredient IDs from L6:
 
 ```bash
-curl -X GET "http://localhost:5000/api/recipes" \
+curl -X GET "http://localhost:5000/api/ingredients" \
   -H "Authorization: Bearer $TOKEN"
 # Expected: List of ingredients with IDs
 # Save ingredient IDs as: ING1="...", ING2="...", ING3="..."
@@ -1676,7 +1654,7 @@ Result: Recipe.CostPerPortion is ALWAYS server-authoritative, computed post-save
 |---|---|
 | **C-1** | CreateRecipe, AddRecipeItem, RemoveRecipeItem, CreateRecipeVersion, UpdateRecipe (if portionCount changes) all call `ICostCascadeService.RecalculateForIngredientAsync` |
 | **C-2** | Cascade service implements the canonical formula. No handlers compute cost directly. Formula: `cost_per_portion = SUM( (current_price / unit_size) * quantity * (1 / yield_percentage) ) / portion_count` |
-| **C-3** | Current price_always fetched using: `SELECT price FROM IngredientPriceHistory WHERE ingredient_id = @id ORDER BY committed_at DESC LIMIT 1` |
+| **C-3** | Current price always fetched using: `SELECT price FROM ingredient_price_histories WHERE ingredient_id = @id ORDER BY committed_at DESC LIMIT 1` |
 | **C-9** | `Recipe.CostThresholdPercentage` is removed in v1 — no stored threshold; personal Telegram spike alerts added in Phase 4 (L15) |
 | **C-10** | Unified `RecipeResponse` — single user sees all fields (including `Items` on detail endpoint). Role-split DTOs are v2-only (`// v2-only:` stubs preserved in `RecipeResponse.cs`). |
 | **C-12** | Cost threshold alert removed in v1 — no stored threshold. Spike alerts dispatched via `IAlertDispatcher.SendPriceSpikeAlertAsync(userId, ...)` |
@@ -1722,7 +1700,7 @@ Across L6–L8, you now have:
 using Microsoft.EntityFrameworkCore;
 using Nastart.Application.Features.Recipes.Queries.GetRecipes;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Data;
+using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
@@ -1765,7 +1743,7 @@ using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Features.Recipes.Commands.CreateRecipe;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Data;
+using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
@@ -1870,7 +1848,7 @@ public sealed class DerivedSellPriceTests
 using Microsoft.EntityFrameworkCore;
 using Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Data;
+using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
@@ -1899,12 +1877,12 @@ public sealed class GetRecipeByIdHandlerTests
         db.RecipeItems.Add(new RecipeItem
         {
             Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId,
-            Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+            Quantity = 500m, YieldPercentage = 1.0m
         });
         db.IngredientPriceHistories.Add(new IngredientPriceHistory
         {
             Id = Guid.NewGuid(), IngredientId = ingredientId, Price = 2.50m,
-            Source = PriceSource.Manual, CommittedAt = DateTime.UtcNow,
+            UnitSize = 1000m, Source = PriceSource.Manual, CommittedAt = DateTimeOffset.UtcNow,
             EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
         });
         await db.SaveChangesAsync();
@@ -1959,7 +1937,7 @@ using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Features.Recipes.Commands.CreateRecipeVersion;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Data;
+using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
@@ -1996,7 +1974,7 @@ public sealed class CreateRecipeVersionHandlerTests
         db.RecipeItems.Add(new RecipeItem
         {
             Id = Guid.NewGuid(), RecipeId = sourceId, IngredientId = ingredientId,
-            Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+            Quantity = 500m, YieldPercentage = 1.0m
         });
         await db.SaveChangesAsync();
 
@@ -2033,7 +2011,7 @@ public sealed class CreateRecipeVersionHandlerTests
         db.RecipeItems.Add(new RecipeItem
         {
             Id = Guid.NewGuid(), RecipeId = sourceId, IngredientId = ingredientId,
-            Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+            Quantity = 500m, YieldPercentage = 1.0m
         });
         await db.SaveChangesAsync();
 
@@ -2059,7 +2037,7 @@ using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Data;
+using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
@@ -2085,9 +2063,9 @@ public sealed class UpdateRecipeHandlerTests
         });
         db.RecipeItems.AddRange(
             new RecipeItem { Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId1,
-                Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m },
+                Quantity = 500m, YieldPercentage = 1.0m },
             new RecipeItem { Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId2,
-                Quantity = 300m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m }
+                Quantity = 300m, YieldPercentage = 1.0m }
         );
         await db.SaveChangesAsync();
 
@@ -2153,7 +2131,7 @@ using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Data;
+using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
@@ -2181,7 +2159,7 @@ public sealed class AddRecipeItemHandlerTests
         db.RecipeItems.Add(new RecipeItem
         {
             Id = Guid.NewGuid(), RecipeId = recipeId, IngredientId = ingredientId,
-            Quantity = 500m, YieldPercentage = 1.0m, UnitSizeSnapshot = 1000m
+            Quantity = 500m, YieldPercentage = 1.0m
         });
         await db.SaveChangesAsync();
 
@@ -2217,6 +2195,7 @@ using Nastart.Application;
 using Nastart.Infrastructure;
 using Nastart.API.Endpoints;
 using Nastart.API.Middleware;
+using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -2262,7 +2241,12 @@ builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer
 
 // v1: no role-based policies — single authenticated user uses RequireAuthorization() only
 // v2-only: C-8 role policies (OwnerOnly, OwnerOrChef, etc.) will be re-introduced in v2 when multi-user roles are added
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
 
 var app = builder.Build();
 

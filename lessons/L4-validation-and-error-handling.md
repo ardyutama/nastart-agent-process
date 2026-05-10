@@ -309,9 +309,9 @@ public class ValidationBehavior<TRequest, TResponse>(IValidator<TRequest>? valid
             .Select(e => Error.Validation(e.PropertyName, e.ErrorMessage))
             .ToList();
 
-        // Cast through object to leverage ErrorOr's implicit List<Error> conversion.
-        // (TResponse)(object) is safer than (dynamic) — keeps compile-time type visibility.
-        return (TResponse)(object)errors;
+        // Use dynamic so ErrorOr<T>'s implicit List<Error> conversion is invoked.
+        // A cast through object would be a direct runtime cast and would throw.
+        return (TResponse)(dynamic)errors;
     }
 }
 ```
@@ -597,10 +597,23 @@ curl -X POST http://localhost:5000/api/ingredients \
   -d '{"name": "Chicken Breast", "unitId": "deadbeef-0000-0000-0000-000000000001", "unitSize": 1.0}'
 # Expected: 404 "The specified unit does not exist."
 
-# 5. Test success — create a unit first, then create ingredient
-# Insert a unit directly:
-docker exec -it $(docker compose ps -q postgres) psql -U dev -d recipe_cost_dev -c \
-  "INSERT INTO units (id, name, abbreviation, created_at) VALUES ('b0000000-0000-0000-0000-000000000001', 'kilogram', 'kg', NOW());"
+# 5. Test success — seed the hardcoded L3/L4 user and required unit, then create ingredient
+docker compose exec -T postgres psql -U dev -d recipe_cost_dev -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO users (id, email, password_hash, is_email_verified, created_at, updated_at)
+VALUES ('c0000000-0000-0000-0000-000000000001', 'test@example.com', 'placeholder', false, NOW(), NOW())
+ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    password_hash = EXCLUDED.password_hash,
+    is_email_verified = EXCLUDED.is_email_verified,
+    updated_at = NOW();
+
+INSERT INTO units (id, name, abbreviation, created_at, updated_at)
+VALUES ('b0000000-0000-0000-0000-000000000001', 'kilogram', 'kg', NOW(), NOW())
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    abbreviation = EXCLUDED.abbreviation,
+    updated_at = NOW();
+SQL
 
 curl -X POST http://localhost:5000/api/ingredients \
   -H "Content-Type: application/json" \
