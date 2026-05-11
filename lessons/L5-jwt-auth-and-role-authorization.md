@@ -978,22 +978,16 @@ dotnet run --project src/Nastart.API
 
 ```bash
 # Step 1: Register
-curl -X POST http://localhost:5000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "john@test.com", "password": "password123"}'
+curl -X POST http://localhost:5000/api/auth/register -H "Content-Type: application/json" -d '{"email": "john@test.com", "password": "password123"}'
 # Expected: 201 {"userId":"...", "message":"Check your email to verify your account."}
 # Check console output — you should see the verification email logged
 
 # Step 2: Verify email (simplified — use the userId from step 1)
-curl -X POST http://localhost:5000/api/auth/verify \
-  -H "Content-Type: application/json" \
-  -d '{"userId": "<userId-from-step-1>"}'
+curl -X POST http://localhost:5000/api/auth/verify -H "Content-Type: application/json" -d '{"userId": "<userId-from-step-1>"}'
 # Expected: 200 {"message":"Email verified. You can now log in."}
 
 # Step 3: Login
-curl -X POST http://localhost:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "john@test.com", "password": "password123"}'
+curl -X POST http://localhost:5000/api/auth/login -H "Content-Type: application/json" -d '{"email": "john@test.com", "password": "password123"}'
 # Expected: 200 {"token":"eyJhbG..."}
 # v1: token only — single user, no outlet or role in response
 
@@ -1003,18 +997,13 @@ curl http://localhost:5000/api/ingredients
 
 # Step 5: Use the token from Step 3 to access ingredients
 TOKEN="eyJh..."  # paste the token from step 3
-curl http://localhost:5000/api/ingredients \
-  -H "Authorization: Bearer $TOKEN"
+curl http://localhost:5000/api/ingredients -H "Authorization: Bearer $TOKEN"
 # Expected: 200 OK with [] (empty list)
 
 # Step 6: Test login guard — try logging in before verification
-curl -X POST http://localhost:5000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "unverified@test.com", "password": "password123"}'
+curl -X POST http://localhost:5000/api/auth/register -H "Content-Type: application/json" -d '{"email": "unverified@test.com", "password": "password123"}'
 
-curl -X POST http://localhost:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "unverified@test.com", "password": "password123"}'
+curl -X POST http://localhost:5000/api/auth/login -H "Content-Type: application/json" -d '{"email": "unverified@test.com", "password": "password123"}'
 # Expected: 401 "Invalid email or password." (same message for all auth failures — prevents account enumeration)
 ```
 

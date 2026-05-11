@@ -48,7 +48,7 @@ The database password lives in a plain-text file that Docker mounts inside the c
 
 ```bash
 # Create the folder that will hold all local secret files
-mkdir secrets
+mkdir -p secrets
 ```
 
 **File:** `secrets/db_password.txt`
@@ -1361,15 +1361,10 @@ app.Run();
 
 ```bash
 # Create the initial migration
-dotnet ef migrations add CreatePhase1Schema \
-  --project src/Nastart.Infrastructure \
-  --startup-project src/Nastart.API \
-  --output-dir Persistence/Migrations
+dotnet ef migrations add CreatePhase1Schema --project src/Nastart.Infrastructure --startup-project src/Nastart.API --output-dir Persistence/Migrations
 
 # Apply the migration to the database
-dotnet ef database update \
-  --project src/Nastart.Infrastructure \
-  --startup-project src/Nastart.API
+dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.API
 ```
 
 > **What just happened:** EF Core compared your entity classes + Fluent API configuration against the current database (empty). It generated a C# migration file that creates all **6 Phase 1 tables** (users, telegram_links, ingredients, ingredient_price_histories, units, categories) with columns, primary keys, foreign keys, indexes, and constraints. Recipe, RecipeItem, and CascadeErrorLog are added in L7. Then `database update` executed the generated SQL against your PostgreSQL.
@@ -1452,9 +1447,7 @@ dotnet build
 
 # 3. Migration applied without errors
 #    If this fails with "connection refused", Postgres isn't ready yet — wait for "healthy" first
-dotnet ef database update \
-  --project src/Nastart.Infrastructure \
-  --startup-project src/Nastart.API
+dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.API
 
 # 4. Tables exist in PostgreSQL
 #    Opens a psql shell inside the running container and runs "\dt" to list tables
@@ -1463,18 +1456,7 @@ docker compose exec -T postgres psql -U dev -d recipe_cost_dev -c "\dt"
 # Recipe, RecipeItem, CascadeErrorLog are added in L7
 
 # 5. Seed the shared unit catalogue used by later lessons
-docker compose exec -T postgres psql -U dev -d recipe_cost_dev -v ON_ERROR_STOP=1 <<'SQL'
-INSERT INTO units (id, name, abbreviation, created_at, updated_at)
-VALUES
-    ('b0000000-0000-0000-0000-000000000001', 'kilogram', 'kg', NOW(), NOW()),
-    ('b0000000-0000-0000-0000-000000000002', 'gram', 'g', NOW(), NOW()),
-    ('b0000000-0000-0000-0000-000000000003', 'litre', 'L', NOW(), NOW()),
-    ('b0000000-0000-0000-0000-000000000004', 'piece', 'pc', NOW(), NOW())
-ON CONFLICT (id) DO UPDATE SET
-    name = EXCLUDED.name,
-    abbreviation = EXCLUDED.abbreviation,
-    updated_at = NOW();
-SQL
+docker compose exec -T postgres psql -U dev -d recipe_cost_dev -v ON_ERROR_STOP=1 -c "INSERT INTO units (id, name, abbreviation, created_at, updated_at) VALUES ('b0000000-0000-0000-0000-000000000001', 'kilogram', 'kg', NOW(), NOW()), ('b0000000-0000-0000-0000-000000000002', 'gram', 'g', NOW(), NOW()), ('b0000000-0000-0000-0000-000000000003', 'litre', 'L', NOW(), NOW()), ('b0000000-0000-0000-0000-000000000004', 'piece', 'pc', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;"
 
 # 6. API runs
 dotnet run --project src/Nastart.API

@@ -1091,20 +1091,14 @@ dotnet run --project src/Nastart.API
 ```bash
 # --- SETUP: Get a JWT token ---
 
-curl -X POST http://localhost:5000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "jane@test.com", "password": "password123"}'
+curl -X POST http://localhost:5000/api/auth/register -H "Content-Type: application/json" -d '{"email": "jane@test.com", "password": "password123"}'
 # Expected: 201 { "userId": "...", "message": "Check your email..." }
 
 USERID="<userId-from-register>"
-curl -X POST http://localhost:5000/api/auth/verify \
-  -H "Content-Type: application/json" \
-  -d "{\"userId\": \"$USERID\"}"
+curl -X POST http://localhost:5000/api/auth/verify -H "Content-Type: application/json" -d "{\"userId\": \"$USERID\"}"
 # Expected: 200 { "message": "Email verified. You can now log in." }
 
-curl -X POST http://localhost:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "jane@test.com", "password": "password123"}'
+curl -X POST http://localhost:5000/api/auth/login -H "Content-Type: application/json" -d '{"email": "jane@test.com", "password": "password123"}'
 # Expected: 200 { "token": "eyJhbG..." }
 
 TOKEN="<token-from-login>"
@@ -1116,25 +1110,14 @@ UNITID="b0000000-0000-0000-0000-000000000001"     # kilogram / kg
 
 # --- TEST 1: Create an ingredient with initial price ---
 
-curl -X POST http://localhost:5000/api/ingredients \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "{
-    \"name\": \"Chicken Breast\",
-    \"unitId\": \"$UNITID\",
-    \"unitSize\": 1.0,
-    \"priceSpikeThresholdPct\": 10,
-    \"initialPrice\": 5.50,
-    \"initialEffectiveDate\": \"2024-01-15\"
-  }"
+curl -X POST http://localhost:5000/api/ingredients -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"name\": \"Chicken Breast\", \"unitId\": \"$UNITID\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 10, \"initialPrice\": 5.50, \"initialEffectiveDate\": \"2024-01-15\"}"
 # Expected: 201 { "id": "<ingredientId>", "name": "Chicken Breast" }
 
 INGREDIENTID="<ingredientId>"
 
 # --- TEST 2: Get all ingredients ---
 
-curl -X GET "http://localhost:5000/api/ingredients" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:5000/api/ingredients" -H "Authorization: Bearer $TOKEN"
 # Expected: 200 {
 #   "ingredients": [
 #     { "id": "...", "name": "Chicken Breast", "unitAbbreviation": "kg",
@@ -1144,8 +1127,7 @@ curl -X GET "http://localhost:5000/api/ingredients" \
 
 # --- TEST 3: Get single ingredient ---
 
-curl -X GET "http://localhost:5000/api/ingredients/$INGREDIENTID" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:5000/api/ingredients/$INGREDIENTID" -H "Authorization: Bearer $TOKEN"
 # Expected: 200 {
 #   "id": "...", "name": "Chicken Breast",
 #   "unit": { "id": "...", "name": "kilogram", "abbreviation": "kg" },
@@ -1156,23 +1138,12 @@ curl -X GET "http://localhost:5000/api/ingredients/$INGREDIENTID" \
 
 # --- TEST 4: Update ingredient metadata ---
 
-curl -X PUT "http://localhost:5000/api/ingredients/$INGREDIENTID" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "{
-    \"name\": \"Organic Chicken Breast\",
-    \"unitId\": \"$UNITID\",
-    \"unitSize\": 1.0,
-    \"priceSpikeThresholdPct\": 15
-  }"
+curl -X PUT "http://localhost:5000/api/ingredients/$INGREDIENTID" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"name\": \"Organic Chicken Breast\", \"unitId\": \"$UNITID\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 15}"
 # Expected: 200 { "id": "...", "name": "Organic Chicken Breast" }
 
 # --- TEST 5: Add a new price with effectiveDate ---
 
-curl -X POST "http://localhost:5000/api/ingredients/$INGREDIENTID/prices" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "{\"price\": 6.75, \"effectiveDate\": \"2024-01-20\"}"
+curl -X POST "http://localhost:5000/api/ingredients/$INGREDIENTID/prices" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"price\": 6.75, \"effectiveDate\": \"2024-01-20\"}"
 # Expected: 201 {
 #   "ingredientId": "...", "price": 6.75,
 #   "effectiveDate": "2024-01-20", "committedAt": "2024-..."
@@ -1180,16 +1151,12 @@ curl -X POST "http://localhost:5000/api/ingredients/$INGREDIENTID/prices" \
 
 # --- TEST 6: Add a price without effectiveDate (defaults to today) ---
 
-curl -X POST "http://localhost:5000/api/ingredients/$INGREDIENTID/prices" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "{\"price\": 7.00}"
+curl -X POST "http://localhost:5000/api/ingredients/$INGREDIENTID/prices" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"price\": 7.00}"
 # Expected: 201 { "effectiveDate": "<today's date>", "committedAt": "..." }
 
 # --- TEST 7: Get price history (ordered newest first) ---
 
-curl -X GET "http://localhost:5000/api/ingredients/$INGREDIENTID/prices" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:5000/api/ingredients/$INGREDIENTID/prices" -H "Authorization: Bearer $TOKEN"
 # Expected: 200 {
 #   "ingredientId": "...", "ingredientName": "Organic Chicken Breast",
 #   "priceHistory": [
@@ -1201,66 +1168,45 @@ curl -X GET "http://localhost:5000/api/ingredients/$INGREDIENTID/prices" \
 
 # --- TEST 8: Price history on ingredient with no prices ---
 
-curl -X POST http://localhost:5000/api/ingredients \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "{\"name\": \"Flour\", \"unitId\": \"$UNITID\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 5}"
+curl -X POST http://localhost:5000/api/ingredients -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"name\": \"Flour\", \"unitId\": \"$UNITID\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 5}"
 
 FLOURID="<flour-ingredient-id>"
 
-curl -X GET "http://localhost:5000/api/ingredients/$FLOURID/prices" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:5000/api/ingredients/$FLOURID/prices" -H "Authorization: Bearer $TOKEN"
 # Expected: 200 { "ingredientId": "...", "ingredientName": "Flour", "priceHistory": [] }
 # Note: empty list is NOT an error
 
 # --- TEST 9: Delete ingredient ---
 
-curl -X DELETE "http://localhost:5000/api/ingredients/$INGREDIENTID" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X DELETE "http://localhost:5000/api/ingredients/$INGREDIENTID" -H "Authorization: Bearer $TOKEN"
 # Expected: 200 { "id": "..." }
 
 # --- ERROR CASES ---
 
 # Duplicate name — case-insensitive: "chicken breast" matches "Chicken Breast"
-curl -X POST http://localhost:5000/api/ingredients \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "{\"name\": \"chicken breast\", \"unitId\": \"$UNITID\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 10}"
+curl -X POST http://localhost:5000/api/ingredients -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"name\": \"chicken breast\", \"unitId\": \"$UNITID\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 10}"
 # Expected: 409 Conflict { "error": "An ingredient with this name already exists." }
 
 # Invalid Unit
-curl -X POST http://localhost:5000/api/ingredients \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "{\"name\": \"Test\", \"unitId\": \"00000000-0000-0000-0000-000000000000\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 10}"
+curl -X POST http://localhost:5000/api/ingredients -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"name\": \"Test\", \"unitId\": \"00000000-0000-0000-0000-000000000000\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 10}"
 # Expected: 404 NotFound { "error": "The specified unit does not exist." }
 
 # Invalid Category
-curl -X POST http://localhost:5000/api/ingredients \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "{\"name\": \"Test2\", \"unitId\": \"$UNITID\", \"categoryId\": \"00000000-0000-0000-0000-000000000000\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 10}"
+curl -X POST http://localhost:5000/api/ingredients -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"name\": \"Test2\", \"unitId\": \"$UNITID\", \"categoryId\": \"00000000-0000-0000-0000-000000000000\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 10}"
 # Expected: 404 NotFound { "error": "The specified category does not exist." }
 
 # Negative price (validation error)
-curl -X POST http://localhost:5000/api/ingredients \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "{\"name\": \"Bad\", \"unitId\": \"$UNITID\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 10, \"initialPrice\": -5.00}"
+curl -X POST http://localhost:5000/api/ingredients -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"name\": \"Bad\", \"unitId\": \"$UNITID\", \"unitSize\": 1.0, \"priceSpikeThresholdPct\": 10, \"initialPrice\": -5.00}"
 # Expected: 400 BadRequest { "errors": [{ "code": "InitialPrice", "description": "..." }] }
 
 # Cross-user access — register a second user and try to access the first user's ingredient
-curl -X POST http://localhost:5000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Bob", "email": "bob@test.com", "password": "password123"}'
+curl -X POST http://localhost:5000/api/auth/register -H "Content-Type: application/json" -d '{"name": "Bob", "email": "bob@test.com", "password": "password123"}'
 # ... verify bob, login as bob to get TOKEN2 ...
 
-curl -X GET "http://localhost:5000/api/ingredients/$FLOURID" \
-  -H "Authorization: Bearer $TOKEN2"
+curl -X GET "http://localhost:5000/api/ingredients/$FLOURID" -H "Authorization: Bearer $TOKEN2"
 # Expected: 403 Forbidden
 
-curl -X DELETE "http://localhost:5000/api/ingredients/$FLOURID" \
-  -H "Authorization: Bearer $TOKEN2"
+curl -X DELETE "http://localhost:5000/api/ingredients/$FLOURID" -H "Authorization: Bearer $TOKEN2"
 # Expected: 403 Forbidden
 
 # No JWT

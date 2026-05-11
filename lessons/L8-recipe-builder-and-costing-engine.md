@@ -1438,8 +1438,7 @@ Assume the API is running with `.MapRecipeEndpoints()` registered. You're logged
 TOKEN="<your-jwt-from-login>"
 
 # List your ingredients from L6
-curl -X GET "http://localhost:5000/api/ingredients" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:5000/api/ingredients" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Step 2: Create a recipe with 3 ingredients
@@ -1447,8 +1446,7 @@ curl -X GET "http://localhost:5000/api/ingredients" \
 First, verify you have ingredient IDs from L6:
 
 ```bash
-curl -X GET "http://localhost:5000/api/ingredients" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:5000/api/ingredients" -H "Authorization: Bearer $TOKEN"
 # Expected: List of ingredients with IDs
 # Save ingredient IDs as: ING1="...", ING2="...", ING3="..."
 ```
@@ -1456,21 +1454,7 @@ curl -X GET "http://localhost:5000/api/ingredients" \
 Create recipe:
 
 ```bash
-curl -X POST "http://localhost:5000/api/recipes" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Test Pasta Carbonara",
-    "portionCount": 4,
-    "packagingCost": 0.45,
-    "targetMargin": 0.35,
-    "versionLabel": "v1",
-    "recipeItems": [
-      {"ingredientId": "'$ING1'", "quantity": 200, "yieldPercentage": 0.95},
-      {"ingredientId": "'$ING2'", "quantity": 100, "yieldPercentage": 0.90},
-      {"ingredientId": "'$ING3'", "quantity": 50, "yieldPercentage": 1.0}
-    ]
-  }'
+curl -X POST "http://localhost:5000/api/recipes" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"name\": \"Test Pasta Carbonara\", \"portionCount\": 4, \"packagingCost\": 0.45, \"targetMargin\": 0.35, \"versionLabel\": \"v1\", \"recipeItems\": [{\"ingredientId\": \"$ING1\", \"quantity\": 200, \"yieldPercentage\": 0.95}, {\"ingredientId\": \"$ING2\", \"quantity\": 100, \"yieldPercentage\": 0.90}, {\"ingredientId\": \"$ING3\", \"quantity\": 50, \"yieldPercentage\": 1.0}]}"
 
 # Expected: 201 Created
 # Response:
@@ -1488,8 +1472,7 @@ curl -X POST "http://localhost:5000/api/recipes" \
 
 ```bash
 RECIPE_ID="<recipe-uuid-1>"
-curl -X GET "http://localhost:5000/api/recipes/$RECIPE_ID" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:5000/api/recipes/$RECIPE_ID" -H "Authorization: Bearer $TOKEN"
 
 # Expected: 200 OK
 # Unified response (single user sees all fields):
@@ -1511,14 +1494,7 @@ curl -X GET "http://localhost:5000/api/recipes/$RECIPE_ID" \
 ### Step 4: Add an ingredient to the recipe
 
 ```bash
-curl -X POST "http://localhost:5000/api/recipes/$RECIPE_ID/items" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ingredientId": "'$ING_NEW'",
-    "quantity": 25,
-    "yieldPercentage": 0.85
-  }'
+curl -X POST "http://localhost:5000/api/recipes/$RECIPE_ID/items" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"ingredientId\": \"$ING_NEW\", \"quantity\": 25, \"yieldPercentage\": 0.85}"
 
 # Expected: 201 Created
 # {
@@ -1533,16 +1509,7 @@ curl -X POST "http://localhost:5000/api/recipes/$RECIPE_ID/items" \
 ### Step 5: Update metadata without triggering cascade
 
 ```bash
-curl -X PUT "http://localhost:5000/api/recipes/$RECIPE_ID" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Test Pasta Carbonara — Deluxe",
-    "portionCount": 4,
-    "packagingCost": 0.60,
-    "targetMargin": 0.40,
-    "versionLabel": "v1"
-  }'
+curl -X PUT "http://localhost:5000/api/recipes/$RECIPE_ID" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"name": "Test Pasta Carbonara — Deluxe", "portionCount": 4, "packagingCost": 0.60, "targetMargin": 0.40, "versionLabel": "v1"}'
 
 # Expected: 200 OK
 # {
@@ -1557,8 +1524,7 @@ curl -X PUT "http://localhost:5000/api/recipes/$RECIPE_ID" \
 ### Step 6: Verify updated cost propagated
 
 ```bash
-curl -X GET "http://localhost:5000/api/recipes/$RECIPE_ID" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:5000/api/recipes/$RECIPE_ID" -H "Authorization: Bearer $TOKEN"
 
 # Expected: costPerPortion now 3.62 (reflects new ingredient cost-per-portion share)
 ```
@@ -1567,8 +1533,7 @@ curl -X GET "http://localhost:5000/api/recipes/$RECIPE_ID" \
 
 ```bash
 RECIPE_ITEM_ID="<item-uuid-from-recipe-detail>"
-curl -X DELETE "http://localhost:5000/api/recipes/$RECIPE_ID/items/$RECIPE_ITEM_ID" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X DELETE "http://localhost:5000/api/recipes/$RECIPE_ID/items/$RECIPE_ITEM_ID" -H "Authorization: Bearer $TOKEN"
 
 # Expected: 200 OK
 # {
@@ -1581,10 +1546,7 @@ curl -X DELETE "http://localhost:5000/api/recipes/$RECIPE_ID/items/$RECIPE_ITEM_
 ### Step 8: Create a new recipe version
 
 ```bash
-curl -X POST "http://localhost:5000/api/recipes/$RECIPE_ID/versions" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"versionLabel": "premium"}'
+curl -X POST "http://localhost:5000/api/recipes/$RECIPE_ID/versions" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"versionLabel": "premium"}'
 
 # Expected: 201 Created
 # {
@@ -1599,16 +1561,7 @@ curl -X POST "http://localhost:5000/api/recipes/$RECIPE_ID/versions" \
 ### Step 9: Update recipe portion count — verify cascade triggers
 
 ```bash
-curl -X PUT "http://localhost:5000/api/recipes/$RECIPE_ID" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Test Pasta Carbonara",
-    "portionCount": 6,
-    "packagingCost": 0.45,
-    "targetMargin": 0.35,
-    "versionLabel": "v1"
-  }'
+curl -X PUT "http://localhost:5000/api/recipes/$RECIPE_ID" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"name": "Test Pasta Carbonara", "portionCount": 6, "packagingCost": 0.45, "targetMargin": 0.35, "versionLabel": "v1"}'
 
 # Expected: 200 OK
 # {
@@ -1619,8 +1572,7 @@ curl -X PUT "http://localhost:5000/api/recipes/$RECIPE_ID" \
 # Note: costPerPortion decreased because portion_count increased (C-2 formula)
 
 # Verify v2 (the version we created) is INDEPENDENT:
-curl -X GET "http://localhost:5000/api/recipes/recipe-uuid-2" \
-  -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:5000/api/recipes/recipe-uuid-2" -H "Authorization: Bearer $TOKEN"
 # v2 still has its own cost — not affected by v1 update (proved independence)
 ```
 

@@ -586,38 +586,17 @@ dotnet build
 dotnet run --project src/Nastart.API
 
 # 3. Test validation — empty name should fail with 400
-curl -X POST http://localhost:5000/api/ingredients \
-  -H "Content-Type: application/json" \
-  -d '{"name": "", "unitId": "00000000-0000-0000-0000-000000000000", "unitSize": 0}'
+curl -X POST http://localhost:5000/api/ingredients -H "Content-Type: application/json" -d '{"name": "", "unitId": "00000000-0000-0000-0000-000000000000", "unitSize": 0}'
 # Expected: 400 with validation errors
 
 # 4. Test missing unit — should fail with 404
-curl -X POST http://localhost:5000/api/ingredients \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Chicken Breast", "unitId": "deadbeef-0000-0000-0000-000000000001", "unitSize": 1.0}'
+curl -X POST http://localhost:5000/api/ingredients -H "Content-Type: application/json" -d '{"name": "Chicken Breast", "unitId": "deadbeef-0000-0000-0000-000000000001", "unitSize": 1.0}'
 # Expected: 404 "The specified unit does not exist."
 
 # 5. Test success — seed the hardcoded L3/L4 user and required unit, then create ingredient
-docker compose exec -T postgres psql -U dev -d recipe_cost_dev -v ON_ERROR_STOP=1 <<'SQL'
-INSERT INTO users (id, email, password_hash, is_email_verified, created_at, updated_at)
-VALUES ('c0000000-0000-0000-0000-000000000001', 'test@example.com', 'placeholder', false, NOW(), NOW())
-ON CONFLICT (id) DO UPDATE SET
-    email = EXCLUDED.email,
-    password_hash = EXCLUDED.password_hash,
-    is_email_verified = EXCLUDED.is_email_verified,
-    updated_at = NOW();
+docker compose exec -T postgres psql -U dev -d recipe_cost_dev -v ON_ERROR_STOP=1 -c "INSERT INTO users (id, email, password_hash, is_email_verified, created_at, updated_at) VALUES ('c0000000-0000-0000-0000-000000000001', 'test@example.com', 'placeholder', false, NOW(), NOW()) ON CONFLICT (id) DO NOTHING; INSERT INTO units (id, name, abbreviation, created_at, updated_at) VALUES ('b0000000-0000-0000-0000-000000000001', 'kilogram', 'kg', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;"
 
-INSERT INTO units (id, name, abbreviation, created_at, updated_at)
-VALUES ('b0000000-0000-0000-0000-000000000001', 'kilogram', 'kg', NOW(), NOW())
-ON CONFLICT (id) DO UPDATE SET
-    name = EXCLUDED.name,
-    abbreviation = EXCLUDED.abbreviation,
-    updated_at = NOW();
-SQL
-
-curl -X POST http://localhost:5000/api/ingredients \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Chicken Breast", "unitId": "b0000000-0000-0000-0000-000000000001", "unitSize": 1.0, "initialPrice": 12.50}'
+curl -X POST http://localhost:5000/api/ingredients -H "Content-Type: application/json" -d '{"name": "Chicken Breast", "unitId": "b0000000-0000-0000-0000-000000000001", "unitSize": 1.0, "initialPrice": 12.50}'
 # Expected: 201 Created with {"id":"...","name":"Chicken Breast"}
 
 # 6. Test duplicate — same request again

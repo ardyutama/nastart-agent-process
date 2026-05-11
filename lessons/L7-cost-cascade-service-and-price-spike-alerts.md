@@ -408,13 +408,9 @@ public sealed class CascadeErrorLogConfiguration : IEntityTypeConfiguration<Casc
 Run these commands to create and apply the migration:
 
 ```bash
-dotnet ef migrations add AddPhase2RecipeEntities \
-  --project src/Nastart.Infrastructure \
-  --startup-project src/Nastart.API
+dotnet ef migrations add AddPhase2RecipeEntities --project src/Nastart.Infrastructure --startup-project src/Nastart.API
 
-dotnet ef database update \
-  --project src/Nastart.Infrastructure \
-  --startup-project src/Nastart.API
+dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.API
 ```
 
 ---
@@ -1719,12 +1715,6 @@ In L8, you'll add the `CreateRecipe` handler which also calls `ICostCascadeServi
 
 Now save this complete content to `lessons/L7-cost-cascade-service-and-price-spike-alerts.md` inside your project folder.
 
-You can copy the markdown above and create the file, or use this terminal command:
-
-```bash
-cat > lessons/L7-cost-cascade-service-and-price-spike-alerts.md << 'EOF'
-[paste the entire markdown content above]
-EOF
-```
+Create `lessons/L7-cost-cascade-service-and-price-spike-alerts.md` in VS Code and paste the complete markdown above. This content is long enough that editor review is safer than terminal redirection.
 
 L7 written: 1,247 lines
