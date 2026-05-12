@@ -83,7 +83,7 @@ dotnet add src/RecipeCost.Application package ErrorOr
 
 # Auth
 dotnet add src/RecipeCost.API package Microsoft.AspNetCore.Authentication.JwtBearer
-dotnet add src/RecipeCost.Infrastructure package System.IdentityModel.Tokens.Jwt
+dotnet add src/RecipeCost.Infrastructure package Microsoft.IdentityModel.JsonWebTokens
 dotnet add src/RecipeCost.Infrastructure package BCrypt.Net-Next
 
 # EF Core CLI (global)
@@ -201,8 +201,8 @@ public interface ITokenService
 
 **JWT claims emitted (v1 only):**
 ```csharp
-new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-new Claim(ClaimTypes.Email, email)
+new Claim("sub", userId.ToString()),
+new Claim("email", email)
 // exp set automatically via SecurityTokenDescriptor.Expires
 ```
 

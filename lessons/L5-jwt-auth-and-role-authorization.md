@@ -112,6 +112,9 @@ public enum Role
 # API project needs JWT auth
 dotnet add src/Nastart.API package Microsoft.AspNetCore.Authentication.JwtBearer
 
+# Infrastructure generates JWTs via JsonWebTokenHandler (current .NET approach)
+dotnet add src/Nastart.Infrastructure package Microsoft.IdentityModel.JsonWebTokens
+
 # Infrastructure needs password hashing
 dotnet add src/Nastart.Infrastructure package BCrypt.Net-Next
 ```
@@ -340,11 +343,13 @@ public interface ITokenService
 
 **File:** `src/Nastart.Infrastructure/Services/JwtTokenService.cs`
 
+> For the current .NET 10-style approach, generate the token with `JsonWebTokenHandler` from `Microsoft.IdentityModel.JsonWebTokens`. `AddJwtBearer` validation in `Program.cs` stays the same.
+
 ```csharp
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Nastart.Application.Common.Interfaces;
 
@@ -355,14 +360,6 @@ public class JwtTokenService(IConfiguration config) : ITokenService
 {
     public string GenerateToken(Guid userId, string email)
     {
-        var claims = new List<Claim>
-        {
-            new(JwtRegisteredClaimNames.Sub, userId.ToString()),
-            new(JwtRegisteredClaimNames.Email, email)
-        };
-        // Token expiry: set to 24 hours
-        var expires = DateTime.UtcNow.AddHours(24);
-
         var secret = config["Jwt:SecretKey"]
             ?? throw new InvalidOperationException(
                 "Jwt:SecretKey is not configured. Set it via user-secrets (dev) or " +
@@ -371,14 +368,20 @@ public class JwtTokenService(IConfiguration config) : ITokenService
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var token = new JwtSecurityToken(
-            issuer: config["Jwt:Issuer"],
-            audience: config["Jwt:Audience"],
-            claims: claims,
-            expires: expires,
-            signingCredentials: creds);
+        var tokenDescriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(new[]
+            {
+                new Claim("sub", userId.ToString()),
+                new Claim("email", email)
+            }),
+            Expires = DateTime.UtcNow.AddHours(24),
+            Issuer = config["Jwt:Issuer"],
+            Audience = config["Jwt:Audience"],
+            SigningCredentials = creds
+        };
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        return new JsonWebTokenHandler().CreateToken(tokenDescriptor);
     }
 }
 ```
@@ -600,16 +603,18 @@ Update existing endpoints to require authentication. Also add the helper to extr
 
 ```csharp
 using System.Security.Claims;
-using System.IdentityModel.Tokens.Jwt;
 
 namespace Nastart.API.Extensions;
 
 public static class ClaimsPrincipalExtensions
 {
+    private const string SubjectClaim = "sub";
+    private const string EmailClaim = "email";
+
     public static Guid GetUserId(this ClaimsPrincipal principal)
     {
         var value = principal.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub)
+            ?? principal.FindFirstValue(SubjectClaim)
             ?? throw new UnauthorizedAccessException("userId claim missing from token.");
         return Guid.Parse(value);
     }
@@ -617,7 +622,7 @@ public static class ClaimsPrincipalExtensions
     public static string GetEmail(this ClaimsPrincipal user)
     {
         return user.FindFirstValue(ClaimTypes.Email)
-            ?? user.FindFirstValue(JwtRegisteredClaimNames.Email)
+            ?? user.FindFirstValue(EmailClaim)
             ?? throw new InvalidOperationException("Email claim not found.");
     }
 
