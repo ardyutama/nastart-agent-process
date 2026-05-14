@@ -13,9 +13,9 @@ This repo documents how GitHub Copilot agents were used systematically — from 
 | Folder | Contents |
 |---|---|
 | [`lessons/`](lessons/) | 8 lessons covering Clean Architecture, EF Core schema, CQRS with MediatR, validation, JWT auth, ingredient management, cost cascade, and recipe costing engine |
-| [`business-flows/`](business-flows/) | Canonical flow analysis and architecture history; some files preserve pre-v1 enterprise context and should be read with the v1 constraints |
+| [`business-flows/`](business-flows/) | Canonical flow root; use `business-flows/v1/` for active implementation guidance and `business-flows/v2-reference/` only for historical enterprise reference |
 | [`personas/`](personas/) | Target user research — home bakers, F&B owners, head chefs, procurement, cost controllers |
-| [`flows/`](flows/) | Feature-level user flows: auth, recipe builder, ingredient management, invoice OCR, Telegram |
+| [`archive/legacy-flows/`](archive/legacy-flows/) | Retired draft flow docs preserved only for historical comparison; not active implementation guidance |
 | [`docs/decisions/`](docs/decisions/) | ADRs capturing durable architectural decisions and scope changes |
 | [`docs/progress/`](docs/progress/) | Current lesson status, revision ledger, and documentation sync notes |
 | [`docs/plans/`](docs/plans/) | Design documents produced during brainstorming sessions |

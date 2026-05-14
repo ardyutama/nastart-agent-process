@@ -1,8 +1,9 @@
 # v1 Constraints — Solopreneur Scope
 
-> **Load this file at the start of every coding session.**
+> **Load this file together with `AGENTS.md` at the start of every coding session.**
 > This is the most important context file. It defines exactly what v1 IS and what it IS NOT.
 > Agents that ignore this file will build enterprise code that doesn't belong in v1.
+> If this file conflicts with older lesson snippets or context packs, follow this file and `AGENTS.md`.
 
 ---
 

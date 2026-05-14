@@ -1,5 +1,8 @@
 # Flow 03 — Recipe Builder & Costing Engine
 
+> **Track:** `business-flows/v2-reference/`
+> **Authority:** Historical enterprise reference only. Do not implement current v1 behavior from this file; use `AGENTS.md`, `.github/context/v1-constraints.md`, and the v1 flow rewrites under `business-flows/v1/`.
+>
 > **Status:** ACCEPTED (Round 1) — Lead Architect validated, no defects. Canonical reference for cost formula and cascade interface.
 > **Service owner:** .NET 10 Web API
 > **Entities:** Recipe, RecipeItem, Ingredient, IngredientPriceHistory

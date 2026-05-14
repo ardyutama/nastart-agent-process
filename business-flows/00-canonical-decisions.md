@@ -1,8 +1,10 @@
 # Canonical Decisions — Recipe Cost Management App
 
-> These are the locked, authoritative design decisions validated by the Lead Architect across all 5 business flows. Every implementation file, API contract, and database schema MUST conform to these. Do not deviate without updating all flows accordingly.
+> These are the locked, authoritative design decisions validated by the Lead Architect across the business-flow documentation. Every implementation file, API contract, and database schema MUST conform to these. Do not deviate without updating all relevant flows accordingly.
 >
-> **Update (April 17, 2026):** For the current single-user v1 build, C-1 through C-7, C-13, and C-14 remain active. C-8 through C-12 are preserved below as historical team-oriented reference and are superseded for v1 by `.github/context/v1-constraints.md` and `docs/decisions/ADR-001-single-user-v1-scope.md`.
+> **Track placement (May 14, 2026):** This file stays at the `business-flows/` root because several decisions are shared by both the active `v1/` track and the historical `v2-reference/` track.
+>
+> **Current v1 rule:** For the single-user v1 build, C-1 through C-7, C-13, and C-14 remain active. C-8 through C-12 are preserved below as historical team-oriented reference and are superseded for v1 by `AGENTS.md` and `.github/context/v1-constraints.md`.
 
 ---
 

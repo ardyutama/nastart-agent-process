@@ -2,7 +2,23 @@
 
 > Load this file when starting any Phase 1 coding work.
 > Also load: `AGENTS.md` + `.github/context/v1-constraints.md`
+> For flow-level behavior in Phase 1, load `business-flows/00-index.md`, `business-flows/v1/01-auth-telegram-linking.md`, and `business-flows/v1/02-ingredient-price-management.md`.
+> For .NET backend work, also load the relevant `.github/skills/dotnet-skills/` docs.
+> For business logic changes, also load `.github/skills/test-driven-development/SKILL.md` and follow TDD: failing test first, then implementation.
 > Lesson to follow: `lessons/L1-clean-architecture-and-solution-scaffold.md` then `lessons/L2-ef-core-postgresql-schema.md`
+> If this file conflicts with `AGENTS.md` or `.github/context/v1-constraints.md`, those files win.
+
+---
+
+## Phase 1 Working Rules
+
+- Use the `Nastart` solution and `Nastart.*` project names. If older lesson snippets still show `RecipeCost.*` or `Nastart.API`, translate them to `Nastart.*` and `Nastart.Api`.
+- For auth behavior in Phase 1, use `business-flows/v1/01-auth-telegram-linking.md` as the current flow spec.
+- For ingredient CRUD and price-history behavior in Phase 1, use `business-flows/v1/02-ingredient-price-management.md` as the current flow spec.
+- Before .NET backend work, load `.github/skills/dotnet-skills/dotnet-best-practices/SKILL.md` plus the relevant specialized .NET skill for the task.
+- Keep `Nastart.Api` focused on HTTP mapping, auth context, request validation, and result translation. Put business logic in `Nastart.Application` and `Nastart.Domain`.
+- For business logic, follow TDD: write the lowest-level failing test first, confirm it fails for the right reason, implement the smallest change to pass, then refactor.
+- If no suitable test project exists yet, ask before adding test packages or scaffolding new test infrastructure.
 
 ---
 
@@ -22,22 +38,22 @@ A running .NET 10 API with:
 
 ```bash
 mkdir nastart && cd nastart
-dotnet new sln -n RecipeCost
-dotnet new webapi -n RecipeCost.API -o src/RecipeCost.API
-dotnet new classlib -n RecipeCost.Domain -o src/RecipeCost.Domain
-dotnet new classlib -n RecipeCost.Application -o src/RecipeCost.Application
-dotnet new classlib -n RecipeCost.Infrastructure -o src/RecipeCost.Infrastructure
+dotnet new sln --format sln -n Nastart
+dotnet new webapi -n Nastart.Api -o src/Nastart.Api --framework net10.0
+dotnet new classlib -n Nastart.Domain -o src/Nastart.Domain --framework net10.0
+dotnet new classlib -n Nastart.Application -o src/Nastart.Application --framework net10.0
+dotnet new classlib -n Nastart.Infrastructure -o src/Nastart.Infrastructure --framework net10.0
 dotnet sln add src/**/*.csproj
 ```
 
 **Project references (inner rings only):**
 ```bash
-dotnet add src/RecipeCost.Application reference src/RecipeCost.Domain
-dotnet add src/RecipeCost.Infrastructure reference src/RecipeCost.Domain
-dotnet add src/RecipeCost.Infrastructure reference src/RecipeCost.Application
-dotnet add src/RecipeCost.API reference src/RecipeCost.Domain
-dotnet add src/RecipeCost.API reference src/RecipeCost.Application
-dotnet add src/RecipeCost.API reference src/RecipeCost.Infrastructure
+dotnet add src/Nastart.Application reference src/Nastart.Domain
+dotnet add src/Nastart.Infrastructure reference src/Nastart.Domain
+dotnet add src/Nastart.Infrastructure reference src/Nastart.Application
+dotnet add src/Nastart.Api reference src/Nastart.Domain
+dotnet add src/Nastart.Api reference src/Nastart.Application
+dotnet add src/Nastart.Api reference src/Nastart.Infrastructure
 ```
 
 ---
@@ -63,28 +79,28 @@ IngredientPriceHistory
 
 ```bash
 # Infrastructure
-dotnet add src/RecipeCost.Infrastructure package Microsoft.EntityFrameworkCore
-dotnet add src/RecipeCost.Infrastructure package Npgsql.EntityFrameworkCore.PostgreSQL
+dotnet add src/Nastart.Infrastructure package Microsoft.EntityFrameworkCore
+dotnet add src/Nastart.Infrastructure package Npgsql.EntityFrameworkCore.PostgreSQL
 
 # API (design-time tools for migrations)
-dotnet add src/RecipeCost.API package Microsoft.EntityFrameworkCore.Design
+dotnet add src/Nastart.Api package Microsoft.EntityFrameworkCore.Design
 
 # Application (IAppDbContext uses DbSet<T>)
-dotnet add src/RecipeCost.Application package Microsoft.EntityFrameworkCore
+dotnet add src/Nastart.Application package Microsoft.EntityFrameworkCore
 
 # MediatR
-dotnet add src/RecipeCost.Application package MediatR
-dotnet add src/RecipeCost.API package MediatR
+dotnet add src/Nastart.Application package MediatR
+dotnet add src/Nastart.Api package MediatR
 
 # Validation + result pattern
-dotnet add src/RecipeCost.Application package FluentValidation
-dotnet add src/RecipeCost.Application package FluentValidation.DependencyInjectionExtensions
-dotnet add src/RecipeCost.Application package ErrorOr
+dotnet add src/Nastart.Application package FluentValidation
+dotnet add src/Nastart.Application package FluentValidation.DependencyInjectionExtensions
+dotnet add src/Nastart.Application package ErrorOr
 
 # Auth
-dotnet add src/RecipeCost.API package Microsoft.AspNetCore.Authentication.JwtBearer
-dotnet add src/RecipeCost.Infrastructure package Microsoft.IdentityModel.JsonWebTokens
-dotnet add src/RecipeCost.Infrastructure package BCrypt.Net-Next
+dotnet add src/Nastart.Api package Microsoft.AspNetCore.Authentication.JwtBearer
+dotnet add src/Nastart.Infrastructure package Microsoft.IdentityModel.JsonWebTokens
+dotnet add src/Nastart.Infrastructure package BCrypt.Net-Next
 
 # EF Core CLI (global)
 dotnet tool install --global dotnet-ef
@@ -95,7 +111,7 @@ dotnet tool install --global dotnet-ef
 ## File Locations
 
 ```
-src/RecipeCost.Domain/
+src/Nastart.Domain/
 ├── Common/
 │   └── BaseEntity.cs
 ├── Entities/
@@ -109,7 +125,7 @@ src/RecipeCost.Domain/
     ├── TelegramLinkStatus.cs
     └── PriceSource.cs             ← 'Manual' | 'InvoiceScan' (C-13)
 
-src/RecipeCost.Application/
+src/Nastart.Application/
 ├── Common/
 │   ├── Interfaces/
 │   │   ├── IAppDbContext.cs
@@ -125,7 +141,7 @@ src/RecipeCost.Application/
 │   └── Ingredients/               ← Full CRUD + price history (L6)
 └── DependencyInjection.cs
 
-src/RecipeCost.Infrastructure/
+src/Nastart.Infrastructure/
 ├── Persistence/
 │   ├── AppDbContext.cs
 │   ├── Configurations/
@@ -140,7 +156,7 @@ src/RecipeCost.Infrastructure/
 │   └── JwtTokenService.cs
 └── DependencyInjection.cs
 
-src/RecipeCost.API/
+src/Nastart.Api/
 ├── Program.cs
 ├── Endpoints/
 │   ├── AuthEndpoints.cs
@@ -158,9 +174,9 @@ src/RecipeCost.API/
 # docker-compose.yml at repo root
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
-      POSTGRES_DB: recipe_cost_dev
+      POSTGRES_DB: nastart_dev
       POSTGRES_USER: dev
       POSTGRES_PASSWORD: dev_password
     ports:
@@ -175,12 +191,12 @@ volumes:
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Port=5432;Database=recipe_cost_dev;Username=dev;Password=dev_password"
+    "DefaultConnection": "Host=localhost;Port=5432;Database=nastart_dev;Username=dev;Password=dev_password"
   },
   "JwtSettings": {
     "Secret": "REPLACE_WITH_32+_CHAR_SECRET_IN_USER_SECRETS",
-    "Issuer": "RecipeCost",
-    "Audience": "RecipeCostApp",
+    "Issuer": "Nastart",
+    "Audience": "NastartApp",
     "ExpirationHours": 24
   }
 }
@@ -301,6 +317,7 @@ GET    /health                      → { status: "healthy" }
 
 - [ ] `docker compose up -d` starts PostgreSQL
 - [ ] `dotnet ef database update` runs all migrations without error
+- [ ] Any business logic added in Phase 1 was introduced through a failing test first, or a test-infrastructure blocker was explicitly documented
 - [ ] `POST /api/auth/register` creates a user
 - [ ] `POST /api/auth/login` returns a valid JWT
 - [ ] `GET /api/ingredients` (with JWT) returns empty array

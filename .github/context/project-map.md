@@ -1,37 +1,71 @@
 # Project Map
 
-> Hierarchical summary of all project files.
+> Hierarchical summary of the current workspace context plus the target application structure from `AGENTS.md`.
 > Load only the section relevant to your current task — not the whole file.
-> Updated: April 10, 2026
+> Updated: May 14, 2026
+> If this file conflicts with `AGENTS.md` or `.github/context/v1-constraints.md`, those files win.
 
 ---
 
 ## Top-Level Structure
 
 ```
-nastart/                            ← product code repo (source code lives here)
-
-nastart-evaluation/                 ← THIS repo — planning, lessons, docs
+nastart-agent-process/              ← current workspace: planning, context, lessons, and agent rules
 ├── AGENTS.md                       ← Agent rules file: load every session
-├── CHECKPOINT.md                   ← Full project state: resume from here
 ├── .github/
 │   ├── copilot-instructions.md     ← Coding standards (TDD, quality axes)
 │   ├── context/
 │   │   ├── v1-constraints.md       ← What v1 IS and IS NOT — load every coding session
 │   │   ├── project-map.md          ← This file
-│   │   └── phase-1-session.md      ← Context pack for Phase 1 build
-│   ├── skills/                     ← Agent skill files (idea-refine, brainstorming, etc.)
+│   │   └── phase-1-session.md      ← Context pack for Phase 1 build, aligned to AGENTS.md
+│   ├── skills/                     ← Agent skill files
+│   │   ├── test-driven-development/← Load for business logic changes
+│   │   └── dotnet-skills/          ← Load relevant .NET skills before backend work
 │   └── agents/                     ← Agent definitions
 ├── docs/
-│   ├── ideas/
-│   │   └── recipe-cost-solopreneur.md  ← Ideation one-pager (April 9)
 │   └── plans/
-│       └── 2026-04-09-ocr-packaging-design.md  ← OCR + packaging_cost design
+│       ├── 2026-05-14-versioned-business-flows-design.md
+│       └── 2026-05-14-versioned-business-flows-implementation-plan.md
+├── archive/
+│   └── legacy-flows/              ← Retired draft flow files kept only for historical reference
 ├── lessons/                        ← Step-by-step build lessons L1–L8
-├── business-flows/                 ← Validated business flows and canonical decisions
+├── business-flows/                 ← Versioned flow root: v1 active, v2-reference historical
 ├── personas/                       ← User persona research
-└── flows/                          ← Earlier draft flow files (superseded by business-flows/)
 ```
+
+**Missing expected files:**
+- `AGENTS.md` references `CHECKPOINT.md` for full project state, but that file is not currently present in this workspace.
+- Older OCR/scanning guidance references `docs/plans/2026-04-09-ocr-packaging-design.md`, but that file is also not currently present.
+
+Until those files exist, use this project map, `business-flows/00-index.md`, the relevant v1 flow file under `business-flows/v1/`, and the lesson files.
+
+---
+
+## Target Application Structure (from `AGENTS.md`)
+
+```
+nastart/
+├── backend/
+│   ├── Nastart.Api/
+│   ├── Nastart.Application/
+│   ├── Nastart.Domain/
+│   └── Nastart.Infrastructure/
+├── ai-service/
+├── frontend/
+└── docker-compose.yml
+```
+
+---
+
+## Context Loading Rules
+
+- Always load `AGENTS.md` and `.github/context/v1-constraints.md` before coding.
+- For flow-level behavior, load `business-flows/00-index.md` and then the relevant file under `business-flows/v1/`.
+- Use `business-flows/v2-reference/` only as historical enterprise reference.
+- Do not use `archive/legacy-flows/` for current implementation guidance.
+- For .NET backend work, also load the relevant `.github/skills/dotnet-skills/` docs.
+- For business logic changes, also load `.github/skills/test-driven-development/SKILL.md` and follow TDD.
+- If older docs conflict with `AGENTS.md`, prefer `AGENTS.md` and `v1-constraints.md`.
 
 ---
 
@@ -50,24 +84,27 @@ Sequential build lessons. v1 solopreneur amendments have been applied to all.
 | `L7-cost-cascade-service-and-price-spike-alerts.md` | CostCascadeService, cascade formula, alerts | ✅ Amended — UserId, PackagingCost, TargetMargin |
 | `L8-recipe-builder-and-costing-engine.md` | Recipe slices, sell price, unified DTO | ✅ Amended — no role-split DTOs |
 
-**How to use lessons:** Follow lessons sequentially. Every `⚠️ v2-only` callout in a lesson body = skip that block. The amendment block at the top of each lesson summarizes all changes.
+**How to use lessons:** Follow lessons sequentially. Every `⚠️ v2-only` callout in a lesson body = skip that block. The amendment block at the top of each lesson summarizes all changes. If an older lesson snippet still shows `RecipeCost.*` or `Nastart.API`, translate it to `Nastart.*` and `Nastart.Api`.
 
 ---
 
 ## Business Flows (`business-flows/`)
 
-Validated by Lead Architect Agent — 13 defects found and resolved.
-**Note:** These flows were designed for the enterprise version. v1-incompatible sections (role-based routing, outlet scoping, invitation flows) are preserved for v2 reference but should not be coded in Phase 1–3.
+The business-flow docs now use a versioned structure.
 
-| File | Contents | v1 applicability |
+| Path | Contents | Status |
 |---|---|---|
-| `00-index.md` | Flow index + defect resolution log | Reference only |
-| `00-canonical-decisions.md` | All 14 canonical decisions with full detail | See v1-constraints.md for which apply |
-| `01-auth-company-telegram-linking.md` | Company registration, invitations, `/link XXXX` | **Strip**: company/invitation flows; **Keep**: TelegramLink `/link` flow |
-| `02-ingredient-price-management.md` | Ingredient CRUD, price update, cascade algorithm | ✅ Mostly applicable — ignore outlet-scoping |
-| `03-recipe-builder-costing-engine.md` | Recipe creation, cascade, threshold alerts | ✅ Applicable — ignore outlet scope, role visibility, CostThresholdPct |
-| `04-invoice-scanning-review-commit.md` | OCR upload, review queue, price commit | ✅ Applicable — updated by `docs/plans/2026-04-09-ocr-packaging-design.md` |
-| `05-telegram-bot-flows.md` | Account linking, alerts, `/cost` command | ✅ Applicable — reframed as personal alerts (no role-based routing) |
+| `00-index.md` | Router page for flow discovery and authority order | Active |
+| `00-canonical-decisions.md` | Shared canonical decisions with v1 applicability notes | Active |
+| `v1/README.md` | Entry point for the active v1 flow set | Active |
+| `v1/01-auth-telegram-linking.md` | Single-user auth, verification, login, Telegram linking | Active v1 guidance |
+| `v1/02-ingredient-price-management.md` | User-scoped ingredient CRUD, append-only price history, cascade trigger | Active v1 guidance |
+| `v1/03-recipe-builder-costing-engine.md` | User-scoped recipes, derived sell price, unified response DTOs | Active v1 guidance |
+| `v1/04-invoice-scanning-review-commit.md` | Single-user invoice review and `InvoiceScan` price commits; guarded where missing OCR design details remain | Active v1 guidance |
+| `v1/05-telegram-bot-flows.md` | Single-user Telegram commands and alerts | Active v1 guidance |
+| `v2-reference/` | Historical enterprise flow set preserved for reference | Historical only |
+
+**Discovery rule:** Use the `v1/` files for current implementation work. Do not implement from `v2-reference/` unless you are explicitly working on future enterprise scope.
 
 ---
 
@@ -75,8 +112,10 @@ Validated by Lead Architect Agent — 13 defects found and resolved.
 
 | File | Contents |
 |---|---|
-| `docs/ideas/recipe-cost-solopreneur.md` | Ideation one-pager: problem statement, MVP scope, Not Doing list, resolved open questions |
-| `docs/plans/2026-04-09-ocr-packaging-design.md` | Approved design: confidence-scored OCR review queue + `packaging_cost` flat field |
+| `docs/plans/2026-05-14-versioned-business-flows-design.md` | Approved design for versioning the business-flow docs into active v1 and historical v2-reference tracks |
+| `docs/plans/2026-05-14-versioned-business-flows-implementation-plan.md` | Ordered migration plan for the versioned business-flow rewrite |
+
+**Missing OCR doc:** `AGENTS.md` still references `docs/plans/2026-04-09-ocr-packaging-design.md`, but that file is not present in this workspace.
 
 ---
 
@@ -99,12 +138,24 @@ Validated by Lead Architect Agent — 13 defects found and resolved.
 ```
 AGENTS.md
   └─ points to → .github/context/v1-constraints.md  (load every session)
-  └─ points to → CHECKPOINT.md                       (full project state)
+  └─ points to → CHECKPOINT.md                       (expected full project state file)
+  └─ points to → business-flows/00-index.md         (flow routing)
+  └─ points to → business-flows/v1/                 (active flow specifications by task)
+  └─ requires → .github/skills/dotnet-skills/       (.NET backend work)
+  └─ requires → .github/skills/test-driven-development/SKILL.md (business logic work)
 
 CHECKPOINT.md
-  └─ references → business-flows/                    (validated flows)
-  └─ references → docs/ideas/recipe-cost-solopreneur.md (refined direction)
-  └─ references → docs/plans/                        (approved designs)
+  └─ if present, references → business-flows/        (validated flows)
+  └─ if present, references → docs/plans/            (approved designs)
+
+business-flows/00-index.md
+  └─ routes to → business-flows/v1/README.md
+  └─ routes to → business-flows/v1/01-auth-telegram-linking.md
+  └─ routes to → business-flows/v1/02-ingredient-price-management.md
+  └─ routes to → business-flows/v1/03-recipe-builder-costing-engine.md
+  └─ routes to → business-flows/v1/04-invoice-scanning-review-commit.md
+  └─ routes to → business-flows/v1/05-telegram-bot-flows.md
+  └─ preserves → business-flows/v2-reference/        (historical enterprise reference)
 
 Lessons
   L1 → L2 → L3 → L4 → L5 → L6 → L7 → L8
@@ -116,7 +167,7 @@ Lessons
 
 ---
 
-## Current Build Status (April 10, 2026)
+## Current Build Status (May 14, 2026)
 
 | Phase | Status |
 |---|---|

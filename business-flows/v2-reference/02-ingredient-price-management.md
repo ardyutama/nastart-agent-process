@@ -1,5 +1,8 @@
 # Flow 02 — Ingredient Management & Price History
 
+> **Track:** `business-flows/v2-reference/`
+> **Authority:** Historical enterprise reference only. Do not implement current v1 behavior from this file; use `AGENTS.md`, `.github/context/v1-constraints.md`, and the v1 flow rewrites under `business-flows/v1/`.
+>
 > **Status:** ACCEPTED (Round 2, after defect corrections) — Lead Architect validated
 > **Service owner:** .NET 10 Web API
 > **Entities:** Ingredient, IngredientPriceHistory, Unit, Category, Supplier, TelegramLink

@@ -1,5 +1,8 @@
 # Flow 01 — User Authentication, Company Setup & Telegram Linking
 
+> **Track:** `business-flows/v2-reference/`
+> **Authority:** Historical enterprise reference only. Do not implement current v1 behavior from this file; use `AGENTS.md`, `.github/context/v1-constraints.md`, and the v1 flow rewrites under `business-flows/v1/`.
+>
 > **Status:** HISTORICAL REFERENCE (Accepted in Round 1 for the earlier enterprise design)
 > **Service owner:** .NET 10 Web API + Python FastAPI (bot)
 > **Entities:** Company, Outlet, User, TelegramLink
