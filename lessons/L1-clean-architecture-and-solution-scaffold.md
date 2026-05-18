@@ -36,7 +36,7 @@ Clean Architecture organizes your code into layers (rings). The fundamental rule
 | `Nastart.Domain` | Entity classes, enums, value objects, domain interfaces (e.g. `IIngredientRepository`) | Nothing — this is the innermost ring |
 | `Nastart.Application` | Feature slices (Commands, Queries, Handlers), DTOs, service interfaces (e.g. `ICostCascadeService`), validation rules | Domain only |
 | `Nastart.Infrastructure` | EF Core `DbContext`, repository implementations, external service clients (email, file storage), service implementations | Domain + Application |
-| `Nastart.API` | `Program.cs`, Minimal API endpoint definitions, middleware, DI wiring, configuration | Domain + Application + Infrastructure |
+| `Nastart.Api` | `Program.cs`, Minimal API endpoint definitions, middleware, DI wiring, configuration | Domain + Application + Infrastructure |
 
 ### Why this matters for your recipe costing app
 
@@ -150,13 +150,13 @@ dotnet new sln -n Nastart
 dotnet new classlib -n Nastart.Domain -o src/Nastart.Domain --framework net10.0
 dotnet new classlib -n Nastart.Application -o src/Nastart.Application --framework net10.0
 dotnet new classlib -n Nastart.Infrastructure -o src/Nastart.Infrastructure --framework net10.0
-dotnet new webapi -n Nastart.API -o src/Nastart.API --framework net10.0
+dotnet new webapi -n Nastart.Api -o src/Nastart.Api --framework net10.0
 
 # Add all projects to the solution
 dotnet sln add src/Nastart.Domain
 dotnet sln add src/Nastart.Application
 dotnet sln add src/Nastart.Infrastructure
-dotnet sln add src/Nastart.API
+dotnet sln add src/Nastart.Api
 
 # Create the test project (TDD is a project requirement — tests live here)
 dotnet new xunit -n Nastart.Tests -o tests/Nastart.Tests --framework net10.0
@@ -171,7 +171,8 @@ dotnet add tests/Nastart.Tests package AwesomeAssertions
 dotnet add tests/Nastart.Tests package NSubstitute
 ```
 
-> **Test framework — xUnit vs MSTest.Sdk:** This project uses **xUnit**. For new .NET projects, the current best-practice recommendation is **MSTest.Sdk** (`<Sdk Name="MSTest.Sdk">`): it requires fewer package references, supports sealed test classes for performance, and provides richer built-in assertions (`Assert.ThrowsExactly`, `Assert.HasCount`, `Assert.ContainsSingle`) without an additional library. xUnit is kept here because it pairs naturally with AwesomeAssertions and NSubstitute, which are already part of this setup. If you prefer MSTest, replace `dotnet new xunit` with `dotnet new mstest`, swap `[Fact]` for `[TestMethod]`/`[TestClass]`, and remove the AwesomeAssertions package in favour of MSTest's native assertions. Both frameworks have full `dotnet test`, VS Test Explorer, and GitHub Actions support.
+> **Project naming note:** Use `Nastart.Api` for the API project folder, project file, and namespace. Do not spell the project name with an all-caps API suffix.
+> **Test framework:** This project uses **xUnit** with AwesomeAssertions and NSubstitute. Keep that stack for v1 lessons so examples, filters, and helper setup stay consistent.
 > **AwesomeAssertions:** `result.Should().Be(expected)` — readable assertion syntax (used with xUnit in this project). A free, MIT-licensed fork of FluentAssertions with an identical API.
 > **NSubstitute:** `Substitute.For<IAppDbContext>()` — creates mock implementations of interfaces for unit testing without a real database.
 
@@ -188,9 +189,9 @@ dotnet add src/Nastart.Infrastructure reference src/Nastart.Domain
 dotnet add src/Nastart.Infrastructure reference src/Nastart.Application
 
 # API depends on all (it's the outermost ring — it wires everything)
-dotnet add src/Nastart.API reference src/Nastart.Domain
-dotnet add src/Nastart.API reference src/Nastart.Application
-dotnet add src/Nastart.API reference src/Nastart.Infrastructure
+dotnet add src/Nastart.Api reference src/Nastart.Domain
+dotnet add src/Nastart.Api reference src/Nastart.Application
+dotnet add src/Nastart.Api reference src/Nastart.Infrastructure
 ```
 
 **What you must NEVER do:** Add a reference from Domain to Application, Infrastructure, or API. Domain references nothing.
@@ -207,8 +208,8 @@ nastart/
 │   │   └── Nastart.Application.csproj
 │   ├── Nastart.Infrastructure/    ← data access ring
 │   │   └── Nastart.Infrastructure.csproj
-│   └── Nastart.API/               ← outermost ring
-│       ├── Nastart.API.csproj
+│   └── Nastart.Api/               ← outermost ring
+│       ├── Nastart.Api.csproj
 │       └── Program.cs
 └── tests/
     └── Nastart.Tests/             ← unit tests (xUnit + AwesomeAssertions + NSubstitute)
@@ -225,7 +226,7 @@ rm src/Nastart.Application/Class1.cs
 rm src/Nastart.Infrastructure/Class1.cs
 ```
 
-In `src/Nastart.API/Program.cs`, replace the template content with a clean starting point:
+In `src/Nastart.Api/Program.cs`, replace the template content with a clean starting point:
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -247,7 +248,7 @@ app.Run();
 dotnet build
 
 # Run the API project
-dotnet run --project src/Nastart.API
+dotnet run --project src/Nastart.Api
 
 # In another terminal, test the health endpoint
 curl http://localhost:5000/health
@@ -341,8 +342,8 @@ mkdir -p src/Nastart.Infrastructure/Services
 ### API project
 
 ```bash
-mkdir -p src/Nastart.API/Endpoints
-mkdir -p src/Nastart.API/Extensions
+mkdir -p src/Nastart.Api/Endpoints
+mkdir -p src/Nastart.Api/Extensions
 ```
 
 - `Endpoints/` — Minimal API endpoint groups
@@ -380,7 +381,7 @@ All entities will inherit from this. EF Core will map `Id` as the primary key, a
 
 ## 6. Your First Unit Test — Verifying the Test Setup
 
-Before writing handlers in L3+, verify the test infrastructure works. Create one smoke test to confirm xUnit, NSubstitute, and AwesomeAssertions are correctly wired together.
+Before business logic work begins, verify the test infrastructure works. Create one smoke test to confirm xUnit, NSubstitute, and AwesomeAssertions are correctly wired together.
 
 ```bash
 mkdir tests/Nastart.Tests/Smoke
@@ -416,9 +417,9 @@ dotnet test tests/Nastart.Tests
 # Test name: Nastart.Tests.Smoke.InfrastructureSmokeTest.TestInfrastructure_ShouldWork
 ```
 
-> **What this proves:** xUnit discovered the test, NSubstitute created a mock of `IAppDbContext`, and AwesomeAssertions made an assertion without crashing. TDD infrastructure is ready.
+> **What this proves:** xUnit discovered the test, NSubstitute created a mock of `IAppDbContext`, and AwesomeAssertions made an assertion without crashing. This test validates the tooling harness only; real feature tests should assert application behavior.
 
-> **Test-first rule from L3 onward:** Every feature handler gets a failing test written BEFORE the handler code. This smoke test confirms the harness works so you can follow that rule from the first slice.
+> **Test-first rule from L2 onward:** When business logic or entities appear, write the failing behavior test before the implementation. This smoke test just confirms the harness is ready.
 
 ---
 
@@ -461,10 +462,14 @@ Run these checks:
 dotnet build
 
 # 2. API starts and responds
-dotnet run --project src/Nastart.API
+dotnet run --project src/Nastart.Api
 # curl http://localhost:5000/health → {"status":"healthy"}
 
-# 3. Verify project references are correct
+# 3. Smoke test passes
+dotnet test tests/Nastart.Tests
+# Expected output includes: "1 passed"
+
+# 4. Verify project references are correct
 dotnet list src/Nastart.Domain/Nastart.Domain.csproj reference
 # Should show: (empty — Domain references nothing)
 
@@ -474,8 +479,8 @@ dotnet list src/Nastart.Application/Nastart.Application.csproj reference
 dotnet list src/Nastart.Infrastructure/Nastart.Infrastructure.csproj reference
 # Should show: Nastart.Domain, Nastart.Application
 
-dotnet list src/Nastart.API/Nastart.API.csproj reference
+dotnet list src/Nastart.Api/Nastart.Api.csproj reference
 # Should show: Nastart.Domain, Nastart.Application, Nastart.Infrastructure
 ```
 
-If all 3 pass, your Clean Architecture foundation is solid. Move to L2.
+If all 4 pass, your Clean Architecture foundation is solid. Move to L2.

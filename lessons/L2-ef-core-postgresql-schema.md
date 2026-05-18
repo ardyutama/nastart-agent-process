@@ -19,6 +19,7 @@
 > - `Supplier` entity and `SupplierConfiguration`
 > - `Role` enum (`Owner`, `Chef`, `Procurement`, `Viewer`) — no roles in v1
 > - `InvitationStatus` enum — no invitations in v1
+> - `InvoiceStatus` enum — added later with the invoice/OCR flow, not in L2
 >
 > **Change these:**
 > - `Ingredient`: replace `Guid OutletId` with `Guid UserId` (FK → `User.Id`). Update the unique index from `(OutletId, Name)` to `(UserId, Name)`.
@@ -35,6 +36,8 @@
 > - `TelegramLinkStatus` enum — still needed for personal Telegram cost alerts
 > - `PriceSource` enum (`Manual`, `InvoiceScan`) — canonical decision C-13 unchanged
 > - All canonical decisions C-1 through C-5, C-13 — unchanged
+>
+> The implementation sections below show only the v1 Phase 1 schema to build now. Use `business-flows/v2-reference/` for historical enterprise examples.
 
 ---
 
@@ -171,7 +174,7 @@ docker volume ls
 
 The connection string is split across two files. `appsettings.json` contains a safe-to-commit placeholder; `appsettings.Development.json` (gitignored) overrides it with the real password for local dev.
 
-**File:** `src/Nastart.API/appsettings.json`
+**File:** `src/Nastart.Api/appsettings.json`
 
 ```json
 {
@@ -187,7 +190,7 @@ The connection string is split across two files. `appsettings.json` contains a s
 }
 ```
 
-**File:** `src/Nastart.API/appsettings.Development.json` ← **gitignored, never committed**
+**File:** `src/Nastart.Api/appsettings.Development.json` ← **gitignored, never committed**
 
 ```json
 {
@@ -215,7 +218,7 @@ dotnet add src/Nastart.Infrastructure package EFCore.NamingConventions
 dotnet add src/Nastart.Infrastructure package Microsoft.Extensions.Hosting
 
 # API needs the EF Core design-time tools for migrations
-dotnet add src/Nastart.API package Microsoft.EntityFrameworkCore.Design
+dotnet add src/Nastart.Api package Microsoft.EntityFrameworkCore.Design
 
 # Application needs EF Core for DbSet<T> reference in IAppDbContext
 dotnet add src/Nastart.Application package Microsoft.EntityFrameworkCore
@@ -236,22 +239,7 @@ dotnet tool install --global dotnet-ef
 
 Before creating entities, define the enums they depend on.
 
-> ⚠️ **v2-only — do not build in v1.** Roles are introduced when the product expands to multi-user teams.
-
-**File:** `src/Nastart.Domain/Enums/Role.cs`
-
-```csharp
-namespace Nastart.Domain.Enums;
-
-// Canonical Decision C-8: Exactly 4 roles — no Admin, no Manager, no Superuser
-public enum Role
-{
-    Owner,
-    Chef,
-    Procurement,
-    Viewer
-}
-```
+Build only the v1 enums below. Do not create `Role`, `InvitationStatus`, or `InvoiceStatus` in L2.
 
 **File:** `src/Nastart.Domain/Enums/TelegramLinkStatus.cs`
 
@@ -264,21 +252,6 @@ public enum TelegramLinkStatus
     Pending,
     Confirmed,
     Unlinked
-}
-```
-
-> ⚠️ **v2-only — do not build in v1.** Invitations do not exist in the single-user v1 product.
-
-**File:** `src/Nastart.Domain/Enums/InvitationStatus.cs`
-
-```csharp
-namespace Nastart.Domain.Enums;
-
-public enum InvitationStatus
-{
-    Pending,
-    Used,
-    Expired
 }
 ```
 
@@ -296,76 +269,11 @@ public enum PriceSource
 }
 ```
 
-> ⚠️ **Phase 3 only — do not build in L2.** Invoice scanning is introduced later, after the receipt/OCR flow exists.
-
-**File:** `src/Nastart.Domain/Enums/InvoiceStatus.cs`
-
-```csharp
-namespace Nastart.Domain.Enums;
-
-// Phase 3 only — do not create this enum in L2.
-// Add it when invoice entities are introduced with the OCR/review flow.
-public enum InvoiceStatus
-{
-    Processing,
-    Review,
-    Committed,
-    Failed
-}
-```
-
 ---
 
 ## 4. Domain Entities — 6 v1 Phase 1 Entities
 
 Each entity inherits from `BaseEntity` (created in L1). All live in `src/Nastart.Domain/Entities/`.
-
-### Company
-
-> ⚠️ **v2-only — do not build in v1.** Company hierarchy is introduced when the product expands to multi-outlet teams.
-
-**File:** `src/Nastart.Domain/Entities/Company.cs`
-
-```csharp
-namespace Nastart.Domain.Entities;
-
-using Nastart.Domain.Common;
-
-public class Company : BaseEntity
-{
-    public string Name { get; set; } = string.Empty;
-    public string Currency { get; set; } = "USD";
-    public string Timezone { get; set; } = "UTC";
-
-    // Navigation — a company has many outlets
-    public ICollection<Outlet> Outlets { get; set; } = [];
-}
-```
-
-### Outlet
-
-> ⚠️ **v2-only — do not build in v1.**
-
-**File:** `src/Nastart.Domain/Entities/Outlet.cs`
-
-```csharp
-namespace Nastart.Domain.Entities;
-
-using Nastart.Domain.Common;
-
-public class Outlet : BaseEntity
-{
-    public string Name { get; set; } = string.Empty;
-
-    // FK to Company
-    public Guid CompanyId { get; set; }
-    public Company Company { get; set; } = null!;
-
-    // Navigation
-    public ICollection<OutletUser> OutletUsers { get; set; } = [];
-    public ICollection<Ingredient> Ingredients { get; set; } = [];
-}
-```
 
 ### User
 
@@ -387,68 +295,10 @@ public class User : BaseEntity
     public bool IsEmailVerified { get; set; }
 
     // Navigation
-    // v2-only: OutletUsers removed — no OutletUser entity in v1
     public ICollection<TelegramLink> TelegramLinks { get; set; } = [];
     public ICollection<Ingredient> Ingredients { get; set; } = [];
     // Added in L7 after Recipe exists:
     // public ICollection<Recipe> Recipes { get; set; } = [];
-}
-```
-
-### OutletUser (Join Table)
-
-> ⚠️ **v2-only — do not build in v1.**
-
-**File:** `src/Nastart.Domain/Entities/OutletUser.cs`
-
-```csharp
-namespace Nastart.Domain.Entities;
-
-using Nastart.Domain.Common;
-using Nastart.Domain.Enums;
-
-// A user can belong to multiple outlets with DIFFERENT roles at each.
-// The role is per-outlet, not per-user.
-public class OutletUser : BaseEntity
-{
-    public Guid UserId { get; set; }
-    public User User { get; set; } = null!;
-
-    public Guid OutletId { get; set; }
-    public Outlet Outlet { get; set; } = null!;
-
-    // C-8: Exactly Owner, Chef, Procurement, Viewer
-    public Role Role { get; set; }
-}
-```
-
-### Invitation
-
-> ⚠️ **v2-only — do not build in v1.**
-
-**File:** `src/Nastart.Domain/Entities/Invitation.cs`
-
-```csharp
-namespace Nastart.Domain.Entities;
-
-using Nastart.Domain.Common;
-using Nastart.Domain.Enums;
-
-public class Invitation : BaseEntity
-{
-    public string Email { get; set; } = string.Empty;
-    public Role Role { get; set; }
-
-    public Guid OutletId { get; set; }
-    public Outlet Outlet { get; set; } = null!;
-
-    // The owner who sent the invitation
-    public Guid InvitedByUserId { get; set; }
-    public User InvitedByUser { get; set; } = null!;
-
-    public string TokenHash { get; set; } = string.Empty;
-    public DateTimeOffset ExpiresAt { get; set; }
-    public InvitationStatus Status { get; set; } = InvitationStatus.Pending;
 }
 ```
 
@@ -549,28 +399,6 @@ public class Category : BaseEntity
 }
 ```
 
-### Supplier
-
-> ⚠️ **v2-only — do not build in v1.**
-
-**File:** `src/Nastart.Domain/Entities/Supplier.cs`
-
-```csharp
-namespace Nastart.Domain.Entities;
-
-using Nastart.Domain.Common;
-
-public class Supplier : BaseEntity
-{
-    public string Name { get; set; } = string.Empty;
-    public string? ContactInfo { get; set; }
-
-    // Supplier is outlet-scoped — different outlets may have different supplier lists
-    public Guid OutletId { get; set; }
-    public Outlet Outlet { get; set; } = null!;
-}
-```
-
 ### Ingredient
 
 **File:** `src/Nastart.Domain/Entities/Ingredient.cs`
@@ -653,11 +481,6 @@ public class IngredientPriceHistory : BaseEntity
     // Defaults to invoice date (if from scan) or today (if manual).
     public DateOnly EffectiveDate { get; init; }
 
-    // Nullable FK — null for Manual entries, populated for InvoiceScan entries
-    // Links back to the specific invoice line item that created this price
-    // Phase 3 only: this FK is forward-declared here for schema completeness.
-    // The InvoiceLineItem entity and invoice scanning logic are built in L12–L14.
-    public Guid? InvoiceLineItemId { get; set; }
 }
 ```
 
@@ -940,40 +763,6 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 }
 ```
 
-> ⚠️ **v2-only — do not build in v1.**
-
-**File:** `src/Nastart.Infrastructure/Persistence/Configurations/OutletUserConfiguration.cs`
-
-```csharp
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Nastart.Domain.Entities;
-
-namespace Nastart.Infrastructure.Persistence.Configurations;
-
-public class OutletUserConfiguration : IEntityTypeConfiguration<OutletUser>
-{
-    public void Configure(EntityTypeBuilder<OutletUser> builder)
-    {
-        // A user can have only one role per outlet
-        builder.HasIndex(ou => new { ou.UserId, ou.OutletId }).IsUnique();
-
-        // Store enum as string for readability in DB
-        builder.Property(ou => ou.Role).HasConversion<string>().HasMaxLength(20);
-
-        builder.HasOne(ou => ou.User)
-            .WithMany(u => u.OutletUsers)
-            .HasForeignKey(ou => ou.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        builder.HasOne(ou => ou.Outlet)
-            .WithMany(o => o.OutletUsers)
-            .HasForeignKey(ou => ou.OutletId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}
-```
-
 **File:** `src/Nastart.Infrastructure/Persistence/Configurations/TelegramLinkConfiguration.cs`
 
 ```csharp
@@ -1145,21 +934,6 @@ public class IngredientPriceHistoryConfiguration : IEntityTypeConfiguration<Ingr
             .WithMany(i => i.PriceHistory)
             .HasForeignKey(p => p.IngredientId)
             .OnDelete(DeleteBehavior.Cascade);
-
-        // ⚠️ Defer to L12 — InvoiceLineItem entity is built in Phase 3 (L12–L14).
-        // Un-comment this block when you add the InvoiceLineItem entity in L12.
-        // C-5: When an InvoiceLineItem is deleted, its price records are preserved (the FK is nulled).
-        //
-        // builder.HasOne<InvoiceLineItem>()
-        //     .WithMany()
-        //     .HasForeignKey(p => p.InvoiceLineItemId)
-        //     .OnDelete(DeleteBehavior.SetNull)
-        //     .IsRequired(false);
-
-        // Phase 3: add this partial index only when invoice review queries need it.
-        // builder.HasIndex(p => p.InvoiceLineItemId)
-        //     .HasFilter("invoice_line_item_id IS NOT NULL");
-
     }
 }
 ```
@@ -1210,55 +984,6 @@ public class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.HasOne(c => c.User)
             .WithMany()
             .HasForeignKey(c => c.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}
-```
-
-> ⚠️ **v2-only — do not build in v1.**
-
-**File:** `src/Nastart.Infrastructure/Persistence/Configurations/InvitationConfiguration.cs`
-
-```csharp
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Nastart.Domain.Entities;
-
-namespace Nastart.Infrastructure.Persistence.Configurations;
-
-public class InvitationConfiguration : IEntityTypeConfiguration<Invitation>
-{
-    public void Configure(EntityTypeBuilder<Invitation> builder)
-    {
-        builder.Property(i => i.Email).HasMaxLength(255).IsRequired();
-        builder.Property(i => i.TokenHash).HasMaxLength(64).IsRequired();
-        builder.Property(i => i.Role).HasConversion<string>().HasMaxLength(20);
-        builder.Property(i => i.Status).HasConversion<string>().HasMaxLength(20);
-    }
-}
-```
-
-> ⚠️ **v2-only — do not build in v1.**
-
-**File:** `src/Nastart.Infrastructure/Persistence/Configurations/SupplierConfiguration.cs`
-
-```csharp
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Nastart.Domain.Entities;
-
-namespace Nastart.Infrastructure.Persistence.Configurations;
-
-public class SupplierConfiguration : IEntityTypeConfiguration<Supplier>
-{
-    public void Configure(EntityTypeBuilder<Supplier> builder)
-    {
-        builder.Property(s => s.Name).HasMaxLength(255).IsRequired();
-        builder.Property(s => s.ContactInfo).HasMaxLength(500);
-
-        builder.HasOne(s => s.Outlet)
-            .WithMany()
-            .HasForeignKey(s => s.OutletId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
@@ -1335,7 +1060,7 @@ public static class DependencyInjection
 
 Update `Program.cs` to call it:
 
-**File:** `src/Nastart.API/Program.cs`
+**File:** `src/Nastart.Api/Program.cs`
 
 ```csharp
 using Nastart.Infrastructure;
@@ -1361,10 +1086,10 @@ app.Run();
 
 ```bash
 # Create the initial migration
-dotnet ef migrations add CreatePhase1Schema --project src/Nastart.Infrastructure --startup-project src/Nastart.API --output-dir Persistence/Migrations
+dotnet ef migrations add CreatePhase1Schema --project src/Nastart.Infrastructure --startup-project src/Nastart.Api --output-dir Persistence/Migrations
 
 # Apply the migration to the database
-dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.API
+dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.Api
 ```
 
 > **What just happened:** EF Core compared your entity classes + Fluent API configuration against the current database (empty). It generated a C# migration file that creates all **6 Phase 1 tables** (users, telegram_links, ingredients, ingredient_price_histories, units, categories) with columns, primary keys, foreign keys, indexes, and constraints. Recipe, RecipeItem, and CascadeErrorLog are added in L7. Then `database update` executed the generated SQL against your PostgreSQL.
@@ -1447,7 +1172,7 @@ dotnet build
 
 # 3. Migration applied without errors
 #    If this fails with "connection refused", Postgres isn't ready yet — wait for "healthy" first
-dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.API
+dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.Api
 
 # 4. Tables exist in PostgreSQL
 #    Opens a psql shell inside the running container and runs "\dt" to list tables
@@ -1459,7 +1184,7 @@ docker compose exec -T postgres psql -U dev -d recipe_cost_dev -c "\dt"
 docker compose exec -T postgres psql -U dev -d recipe_cost_dev -v ON_ERROR_STOP=1 -c "INSERT INTO units (id, name, abbreviation, created_at, updated_at) VALUES ('b0000000-0000-0000-0000-000000000001', 'kilogram', 'kg', NOW(), NOW()), ('b0000000-0000-0000-0000-000000000002', 'gram', 'g', NOW(), NOW()), ('b0000000-0000-0000-0000-000000000003', 'litre', 'L', NOW(), NOW()), ('b0000000-0000-0000-0000-000000000004', 'piece', 'pc', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;"
 
 # 6. API runs
-dotnet run --project src/Nastart.API
+dotnet run --project src/Nastart.Api
 # curl http://localhost:5000/health → {"status":"healthy"}
 ```
 
@@ -1468,7 +1193,7 @@ dotnet run --project src/Nastart.API
 - 2 v1 enums: `TelegramLinkStatus`, `PriceSource`
 - 6 Phase 1 entity classes in Domain/: `User`, `TelegramLink`, `Ingredient`, `IngredientPriceHistory`, `Unit`, `Category`
 - `Recipe`, `RecipeItem`, and `CascadeErrorLog` are intentionally deferred until L7
-- 7 Fluent API configurations with constraints, indexes, and relationships (added UnitConfiguration)
+- 6 Fluent API configurations with constraints, indexes, and relationships
 - AppDbContext with automatic CreatedAt/UpdatedAt on both sync and async paths
 - IAppDbContext interface in Application (v1 entities only; L7 adds Recipe/RecipeItem/CascadeErrorLog)
 - First migration creating all 6 Phase 1 tables
@@ -1481,4 +1206,4 @@ dotnet run --project src/Nastart.API
 |---|---|---|
 | Recipe, RecipeItem | Phase 2 | L7–L8 |
 | CascadeErrorLog | Phase 2 | L7 |
-| Invoice, InvoiceLineItem, ReviewQueueItem | Phase 3 | L12 |
+| Invoice/OCR review entities | Later invoice/OCR flow | Deferred until the invoice schema is finalized |

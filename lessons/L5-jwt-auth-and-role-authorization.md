@@ -59,7 +59,7 @@
 > - Role-based response stripping or dual DTOs (Section 10 — kept for reference, labeled v2-only)
 > - Named authorization policies
 >
-> **Note:** The code examples in Sections 1–8 are v1-ready. Sections 9, 10, and 12 are v2 reference material — skip them in v1 but review them to understand where the design is going.
+> **Note:** Sections 2–7 are v1-ready, and the `ClaimsPrincipalExtensions` code in Section 8 is v1-ready. The v2-only outlet example later in Section 8 plus Sections 9, 10, and 12 are reference material — skip them in v1 but review them to understand where the design is going.
 
 ---
 
@@ -87,20 +87,7 @@ A JWT contains **claims** — key-value pairs about the user:
 
 > **v1 note:** `role` and `outletId` claims do NOT exist in v1. There is one user with one identity. All protected endpoints use `RequireAuthorization()` — no policy name needed.
 
-> ⚠️ **v2-only — do not build the Role enum in v1.** Single-user design has no roles. See amendment block above.
-
-```csharp
-namespace Nastart.Domain.Enums;
-
-// Canonical Decision C-8: Exactly 4 roles — no Admin, no Manager, no Superuser
-public enum Role
-{
-    Owner,       // Full access: costs, margins, food_cost_pct, supplier prices, all alerts
-    Chef,        // cost_per_portion only — no margins, no food_cost_pct
-    Procurement, // cost_per_portion + supplier prices — no food_cost_pct
-    Viewer       // cost_per_portion only — read-only
-}
-```
+> ⚠️ **v2-only — do not build the Role enum in v1.** Single-user design has no roles. Keep the enum out of v1 code and treat later role examples in this lesson as reference material only.
 
 > ⚠️ **v2-only:** Authorization policies, JWT role claims, and role-masked response DTOs are all v2 features. Do not build any of these in v1.
 
@@ -110,7 +97,7 @@ public enum Role
 
 ```bash
 # API project needs JWT auth
-dotnet add src/Nastart.API package Microsoft.AspNetCore.Authentication.JwtBearer
+dotnet add src/Nastart.Api package Microsoft.AspNetCore.Authentication.JwtBearer
 
 # Infrastructure generates JWTs via JsonWebTokenHandler (current .NET approach)
 dotnet add src/Nastart.Infrastructure package Microsoft.IdentityModel.JsonWebTokens
@@ -125,12 +112,12 @@ dotnet add src/Nastart.Infrastructure package BCrypt.Net-Next
 
 Keep the L2 connection-string setup unchanged. Add only the JWT settings to `appsettings.json`:
 
-**File:** `src/Nastart.API/appsettings.json`
+**File:** `src/Nastart.Api/appsettings.json`
 
 ```json
 {
   "Jwt": {
-    "Issuer": "Nastart.API",
+        "Issuer": "Nastart.Api",
     "Audience": "Nastart.Client"
     // SecretKey is NOT stored here — it is loaded from user-secrets (dev) or environment variable (prod)
     // See setup instructions below
@@ -149,7 +136,7 @@ Keep the L2 connection-string setup unchanged. Add only the JWT settings to `app
 > **Development — use .NET User Secrets:**
 > ```bash
 > # Run from the API project folder
-> cd src/Nastart.API
+> cd src/Nastart.Api
 > dotnet user-secrets init
 > dotnet user-secrets set "Jwt:SecretKey" "your-dev-secret-min-32-chars-long-here"
 > ```
@@ -312,7 +299,8 @@ public class RegisterHandler(
         await email.SendAsync(
             user.Email,
             "Verify your Nastart account",
-            $"Click here to verify: /api/auth/verify?token={verificationToken}&userId={user.Id}")
+            $"DEV ONLY verification token: {verificationToken}\n" +
+            $"Complete verification with POST /api/auth/verify-email using userId={user.Id} while token storage is not implemented.")
             .ConfigureAwait(false);
 
         return new RegisterResponse(user.Id, "Check your email to verify your account.");
@@ -481,15 +469,15 @@ public class LoginHandler(
 
 ## 6. Auth Endpoints
 
-**File:** `src/Nastart.API/Endpoints/AuthEndpoints.cs`
+**File:** `src/Nastart.Api/Endpoints/AuthEndpoints.cs`
 
 ```csharp
 using MediatR;
-using Nastart.API.Extensions;
+using Nastart.Api.Extensions;
 using Nastart.Application.Features.Auth.Commands.Login;
 using Nastart.Application.Features.Auth.Commands.Register;
 
-namespace Nastart.API.Endpoints;
+namespace Nastart.Api.Endpoints;
 
 public static class AuthEndpoints
 {
@@ -524,7 +512,7 @@ public static class AuthEndpoints
 
 ## 7. Wire JWT Authentication in Program.cs
 
-**File:** `src/Nastart.API/Program.cs`
+**File:** `src/Nastart.Api/Program.cs`
 
 ```csharp
 using System.Text;
@@ -533,8 +521,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Nastart.Application;
 using Nastart.Infrastructure;
-using Nastart.API.Endpoints;
-using Nastart.API.Middleware;
+using Nastart.Api.Endpoints;
+using Nastart.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -599,12 +587,12 @@ Update existing endpoints to require authentication. Also add the helper to extr
 
 > **Replacing the L4 stub:** If you followed L4's prerequisite note and created a temporary stub `ClaimsPrincipalExtensions` class, **delete that stub now.** The file below is the real, production implementation with proper JWT claim extraction.
 
-**File:** `src/Nastart.API/Extensions/ClaimsPrincipalExtensions.cs`
+**File:** `src/Nastart.Api/Extensions/ClaimsPrincipalExtensions.cs`
 
 ```csharp
 using System.Security.Claims;
 
-namespace Nastart.API.Extensions;
+namespace Nastart.Api.Extensions;
 
 public static class ClaimsPrincipalExtensions
 {
@@ -641,16 +629,16 @@ public static class ClaimsPrincipalExtensions
 
 > ⚠️ **v2-only — do not build in v1.** The `OutletEndpoints.cs` code below is for reference only in Phase 2+. Outlets do not exist in the single-user v1 design. Do not create this file in v1.
 
-**File:** `src/Nastart.API/Endpoints/OutletEndpoints.cs` (v2-only)
+**File:** `src/Nastart.Api/Endpoints/OutletEndpoints.cs` (v2-only)
 
 ```csharp
 using System.Security.Claims;
 using MediatR;
-using Nastart.API.Extensions;
+using Nastart.Api.Extensions;
 using Nastart.Application.Features.Outlets.Commands.CreateOutlet;
 using Nastart.Application.Features.Outlets.Queries.GetOutlets;
 
-namespace Nastart.API.Endpoints;
+namespace Nastart.Api.Endpoints;
 
 public static class OutletEndpoints
 {
@@ -816,6 +804,22 @@ namespace Nastart.Application.Features.Auth.Commands.VerifyEmail;
 public record VerifyEmailResponse(string Message);
 ```
 
+**File:** `src/Nastart.Application/Features/Auth/Commands/VerifyEmail/VerifyEmailCommandValidator.cs`
+
+```csharp
+using FluentValidation;
+
+namespace Nastart.Application.Features.Auth.Commands.VerifyEmail;
+
+public class VerifyEmailCommandValidator : AbstractValidator<VerifyEmailCommand>
+{
+    public VerifyEmailCommandValidator()
+    {
+        RuleFor(x => x.UserId).NotEmpty();
+    }
+}
+```
+
 **File:** `src/Nastart.Application/Features/Auth/Commands/VerifyEmail/VerifyEmailHandler.cs`
 
 ```csharp
@@ -855,8 +859,11 @@ public class VerifyEmailHandler(IAppDbContext db)
 Add to `AuthEndpoints.cs`:
 
 ```csharp
-// Simplified verification — in production, validate actual token hash
-group.MapPost("/verify", async (VerifyEmailCommand command, ISender sender, CancellationToken ct) =>
+using Nastart.Application.Features.Auth.Commands.VerifyEmail;
+
+// Simplified verification — route name matches the production contract
+// even though token storage and validation are still deferred in Phase 1.
+group.MapPost("/verify-email", async (VerifyEmailCommand command, ISender sender, CancellationToken ct) =>
 {
     var result = await sender.Send(command, ct);
     return result.ToApiResult();
@@ -978,17 +985,21 @@ group.MapPost("/setup", async (CreateCompanyRequest request, ClaimsPrincipal use
 Test the complete flow. The API should be running with all endpoints wired:
 
 ```bash
-dotnet run --project src/Nastart.API
+dotnet build
+dotnet test
+dotnet run --project src/Nastart.Api
 ```
+
+Both `dotnet build` and `dotnet test` should pass before starting the API.
 
 ```bash
 # Step 1: Register
 curl -X POST http://localhost:5000/api/auth/register -H "Content-Type: application/json" -d '{"email": "john@test.com", "password": "password123"}'
 # Expected: 201 {"userId":"...", "message":"Check your email to verify your account."}
-# Check console output — you should see the verification email logged
+# Check console output — you should see the dev-only verification instructions logged
 
 # Step 2: Verify email (simplified — use the userId from step 1)
-curl -X POST http://localhost:5000/api/auth/verify -H "Content-Type: application/json" -d '{"userId": "<userId-from-step-1>"}'
+curl -X POST http://localhost:5000/api/auth/verify-email -H "Content-Type: application/json" -d '{"userId": "<userId-from-step-1>"}'
 # Expected: 200 {"message":"Email verified. You can now log in."}
 
 # Step 3: Login

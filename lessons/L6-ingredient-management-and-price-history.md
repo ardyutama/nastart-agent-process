@@ -441,8 +441,7 @@ public class CreateIngredientHandler(IAppDbContext db)
                 UnitSize = command.UnitSize,
                 Source = PriceSource.Manual,
                 CommittedAt = DateTimeOffset.UtcNow,
-                EffectiveDate = command.InitialEffectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow),
-                InvoiceLineItemId = null
+                EffectiveDate = command.InitialEffectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow)
             };
 
             db.IngredientPriceHistories.Add(priceRecord);
@@ -808,8 +807,7 @@ public class AddIngredientPriceHandler(IAppDbContext db)
             UnitSize = ingredient.UnitSize,
             Source = PriceSource.Manual,
             CommittedAt = DateTimeOffset.UtcNow,
-            EffectiveDate = effectiveDate,
-            InvoiceLineItemId = null
+            EffectiveDate = effectiveDate
         };
 
         db.IngredientPriceHistories.Add(priceRecord);
@@ -935,11 +933,11 @@ public class GetIngredientPriceHistoryHandler(IAppDbContext db)
 
 One unified file for all ingredient routes. This follows the `MapGroup` pattern from L5.
 
-**File:** `src/Nastart.API/Endpoints/IngredientEndpoints.cs`
+**File:** `src/Nastart.Api/Endpoints/IngredientEndpoints.cs`
 
 ```csharp
 using MediatR;
-using Nastart.API.Extensions;
+using Nastart.Api.Extensions;
 using Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 using Nastart.Application.Features.Ingredients.Commands.CreateIngredient;
 using Nastart.Application.Features.Ingredients.Commands.DeleteIngredient;
@@ -948,7 +946,7 @@ using Nastart.Application.Features.Ingredients.Queries.GetIngredientById;
 using Nastart.Application.Features.Ingredients.Queries.GetIngredientPriceHistory;
 using Nastart.Application.Features.Ingredients.Queries.GetIngredients;
 
-namespace Nastart.API.Endpoints;
+namespace Nastart.Api.Endpoints;
 
 public static class IngredientEndpoints
 {
@@ -1051,7 +1049,7 @@ public static class IngredientEndpoints
 
 ### Wire in Program.cs
 
-Add this line to `src/Nastart.API/Program.cs` after middleware configuration:
+Add this line to `src/Nastart.Api/Program.cs` after middleware configuration:
 
 ```csharp
 // --- Endpoints ---
@@ -1082,9 +1080,13 @@ app.Run();
 **Before running:** ensure `app.MapIngredientEndpoints()` is in `Program.cs`, then:
 
 ```bash
+dotnet build
+dotnet test
 docker compose up -d   # Start PostgreSQL
-dotnet run --project src/Nastart.API
+dotnet run --project src/Nastart.Api
 ```
+
+Both `dotnet build` and `dotnet test` should pass before starting the API.
 
 ## Test Scenario: Complete Ingredient CRUD Workflow
 
