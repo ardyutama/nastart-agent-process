@@ -931,15 +931,11 @@ public class GetIngredientPriceHistoryHandler(IAppDbContext db)
 
 One unified file for all ingredient routes. This follows the `MapGroup` pattern from L5.
 
-<<<<<<< Updated upstream
-**File:** `src/Nastart.Api/Endpoints/IngredientEndpoints.cs`
-=======
 > .NET 10 note: ASP.NET Core OpenAPI includes mapped minimal API endpoints automatically.
 > Keep `.WithName(...)` for stable operation IDs, but you do not need `.WithOpenApi()`.
 > Scalar reads the generated OpenAPI document, so the important eligibility wiring happens in `Program.cs`.
 
 **File:** `src/Nastart.API/Endpoints/IngredientEndpoints.cs`
->>>>>>> Stashed changes
 
 ```csharp
 using MediatR;
@@ -1048,9 +1044,6 @@ public static class IngredientEndpoints
 
 ### Wire in Program.cs
 
-<<<<<<< Updated upstream
-Add this line to `src/Nastart.Api/Program.cs` after middleware configuration:
-=======
 If the API project does not already reference the required packages:
 
 ```bash
@@ -1059,7 +1052,6 @@ dotnet add src/Nastart.API package Scalar.AspNetCore
 ```
 
 Then update `src/Nastart.API/Program.cs` so the ingredient routes are exposed through the generated OpenAPI document and visible in Scalar:
->>>>>>> Stashed changes
 
 ```csharp
 using Scalar.AspNetCore;
@@ -1128,9 +1120,6 @@ docker compose up -d   # Start PostgreSQL
 dotnet run --project src/Nastart.Api
 ```
 
-<<<<<<< Updated upstream
-Both `dotnet build` and `dotnet test` should pass before starting the API.
-=======
 ## Test Scenario: Verify OpenAPI / Scalar exposure
 
 ```bash
@@ -1143,7 +1132,6 @@ curl -X GET http://localhost:5000/openapi/v1.json
 # Then open http://localhost:5000/scalar in your browser.
 # Expected: the "Ingredients" and "Ingredient Prices" tags appear in Scalar.
 ```
->>>>>>> Stashed changes
 
 ## Test Scenario: Complete Ingredient CRUD Workflow
 
