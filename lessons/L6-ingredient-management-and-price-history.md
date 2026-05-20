@@ -160,6 +160,8 @@ public class GetIngredientsHandler(IAppDbContext db)
         var ingredients = await db.Ingredients
             .AsNoTracking()
             .Where(i => i.UserId == query.UserId)
+            // Order before projecting to keep the full query translatable.
+            .OrderBy(i => i.Name)
             .Select(i => new IngredientSummary(
                 i.Id,
                 i.Name,
@@ -173,7 +175,6 @@ public class GetIngredientsHandler(IAppDbContext db)
                     .Select(p => (decimal?)p.Price)
                     .FirstOrDefault()
             ))
-            .OrderBy(s => s.Name)
             .ToListAsync(ct);
 
         return new GetIngredientsResponse(ingredients);
@@ -554,19 +555,16 @@ public class UpdateIngredientHandler(IAppDbContext db)
         if (ingredient is null || ingredient.UserId != command.UserId)
             return Error.Forbidden("Ingredient.AccessDenied", "You do not have access to this ingredient.");
 
-        // Check for duplicate name when name is being changed (case-insensitive)
-        if (!EF.Functions.ILike(ingredient.Name, command.Name))
-        {
-            var duplicateName = await db.Ingredients
-                .AnyAsync(i =>
-                    i.UserId == command.UserId &&
-                    i.Id != command.IngredientId &&
-                    EF.Functions.ILike(i.Name, command.Name), ct);
+        // Keep ILike inside the translated query; calling it in normal C# triggers client evaluation.
+        var duplicateName = await db.Ingredients
+            .AnyAsync(i =>
+                i.UserId == command.UserId &&
+                i.Id != command.IngredientId &&
+                EF.Functions.ILike(i.Name, command.Name), ct);
 
-            if (duplicateName)
-                return Error.Conflict("Ingredient.Duplicate",
-                    "An ingredient with this name already exists.");
-        }
+        if (duplicateName)
+            return Error.Conflict("Ingredient.Duplicate",
+                "An ingredient with this name already exists.");
 
         // Verify Unit exists
         var unitExists = await db.Units.AnyAsync(u => u.Id == command.UnitId, ct);
@@ -933,7 +931,15 @@ public class GetIngredientPriceHistoryHandler(IAppDbContext db)
 
 One unified file for all ingredient routes. This follows the `MapGroup` pattern from L5.
 
+<<<<<<< Updated upstream
 **File:** `src/Nastart.Api/Endpoints/IngredientEndpoints.cs`
+=======
+> .NET 10 note: ASP.NET Core OpenAPI includes mapped minimal API endpoints automatically.
+> Keep `.WithName(...)` for stable operation IDs, but you do not need `.WithOpenApi()`.
+> Scalar reads the generated OpenAPI document, so the important eligibility wiring happens in `Program.cs`.
+
+**File:** `src/Nastart.API/Endpoints/IngredientEndpoints.cs`
+>>>>>>> Stashed changes
 
 ```csharp
 using MediatR;
@@ -965,8 +971,7 @@ public static class IngredientEndpoints
             var result = await sender.Send(new GetIngredientsQuery(UserId: userId), ct);
             return Results.Ok(result);
         })
-        .WithName("GetIngredients")
-        .WithOpenApi();
+        .WithName("GetIngredients");
 
         // GET /api/ingredients/{ingredientId}
         group.MapGet("/{ingredientId:guid}", async (
@@ -976,8 +981,7 @@ public static class IngredientEndpoints
             var result = await sender.Send(new GetIngredientByIdQuery(ingredientId, UserId: userId), ct);
             return result.ToApiResult();
         })
-        .WithName("GetIngredientById")
-        .WithOpenApi();
+        .WithName("GetIngredientById");
 
         // POST /api/ingredients
         group.MapPost("/", async (
@@ -989,8 +993,7 @@ public static class IngredientEndpoints
             var result = await sender.Send(cmd, ct);
             return result.ToCreatedResult($"/api/ingredients/{result.Value?.Id}");
         })
-        .WithName("CreateIngredient")
-        .WithOpenApi();
+        .WithName("CreateIngredient");
 
         // PUT /api/ingredients/{ingredientId}
         group.MapPut("/{ingredientId:guid}", async (
@@ -1002,8 +1005,7 @@ public static class IngredientEndpoints
             var result = await sender.Send(cmd, ct);
             return result.ToApiResult();
         })
-        .WithName("UpdateIngredient")
-        .WithOpenApi();
+        .WithName("UpdateIngredient");
 
         // DELETE /api/ingredients/{ingredientId}
         group.MapDelete("/{ingredientId:guid}", async (
@@ -1013,8 +1015,7 @@ public static class IngredientEndpoints
             var result = await sender.Send(new DeleteIngredientCommand(ingredientId, UserId: userId), ct);
             return result.ToApiResult();
         })
-        .WithName("DeleteIngredient")
-        .WithOpenApi();
+        .WithName("DeleteIngredient");
 
         // Price sub-routes nested inside the ingredients group to inherit RequireAuthorization()
         var pricesGroup = group.MapGroup("/{ingredientId:guid}/prices")
@@ -1030,8 +1031,7 @@ public static class IngredientEndpoints
             var result = await sender.Send(cmd, ct);
             return result.ToCreatedResult($"/api/ingredients/{ingredientId}/prices");
         })
-        .WithName("AddIngredientPrice")
-        .WithOpenApi();
+        .WithName("AddIngredientPrice");
 
         // GET /api/ingredients/{ingredientId}/prices
         pricesGroup.MapGet("/", async (
@@ -1041,22 +1041,64 @@ public static class IngredientEndpoints
             var result = await sender.Send(new GetIngredientPriceHistoryQuery(ingredientId, UserId: userId), ct);
             return result.ToApiResult();
         })
-        .WithName("GetIngredientPriceHistory")
-        .WithOpenApi();
+        .WithName("GetIngredientPriceHistory");
     }
 }
 ```
 
 ### Wire in Program.cs
 
+<<<<<<< Updated upstream
 Add this line to `src/Nastart.Api/Program.cs` after middleware configuration:
+=======
+If the API project does not already reference the required packages:
+
+```bash
+dotnet add src/Nastart.API package Microsoft.AspNetCore.OpenApi
+dotnet add src/Nastart.API package Scalar.AspNetCore
+```
+
+Then update `src/Nastart.API/Program.cs` so the ingredient routes are exposed through the generated OpenAPI document and visible in Scalar:
+>>>>>>> Stashed changes
 
 ```csharp
+using Scalar.AspNetCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddOpenApi();
+
+var app = builder.Build();
+
+app.UseExceptionHandler();
+
+// Authentication middleware must come before Authorization
+app.UseAuthentication();
+app.UseAuthorization();
+
+if (app.Environment.IsDevelopment())
+{
+    // L5 uses a FallbackPolicy, so the doc endpoints must opt out explicitly.
+    app.MapOpenApi().AllowAnonymous();
+    app.MapScalarApiReference(options =>
+    {
+        options.WithTitle("Nastart API");
+    }).AllowAnonymous();
+}
+
+// Public endpoints
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }))
+    .AllowAnonymous();
+app.MapAuthEndpoints();
+
 // --- Endpoints ---
 app.MapIngredientEndpoints();  // ← L6
 
 app.Run();
 ```
+
+This exposes the OpenAPI document at `/openapi/v1.json` and the Scalar UI at `/scalar` in development.
+`AllowAnonymous()` applies only to the documentation endpoints; the ingredient routes themselves still require JWT auth through the group-level `.RequireAuthorization()`.
 
 ---
 
@@ -1077,7 +1119,7 @@ app.Run();
 
 # How to Test
 
-**Before running:** ensure `app.MapIngredientEndpoints()` is in `Program.cs`, then:
+**Before running:** ensure `AddOpenApi()`, `MapOpenApi().AllowAnonymous()`, `MapScalarApiReference().AllowAnonymous()`, and `app.MapIngredientEndpoints()` are in `Program.cs`, then:
 
 ```bash
 dotnet build
@@ -1086,7 +1128,22 @@ docker compose up -d   # Start PostgreSQL
 dotnet run --project src/Nastart.Api
 ```
 
+<<<<<<< Updated upstream
 Both `dotnet build` and `dotnet test` should pass before starting the API.
+=======
+## Test Scenario: Verify OpenAPI / Scalar exposure
+
+```bash
+curl -X GET http://localhost:5000/openapi/v1.json
+# Expected: 200 OK with ingredient paths such as:
+#   /api/ingredients
+#   /api/ingredients/{ingredientId}
+#   /api/ingredients/{ingredientId}/prices
+
+# Then open http://localhost:5000/scalar in your browser.
+# Expected: the "Ingredients" and "Ingredient Prices" tags appear in Scalar.
+```
+>>>>>>> Stashed changes
 
 ## Test Scenario: Complete Ingredient CRUD Workflow
 
