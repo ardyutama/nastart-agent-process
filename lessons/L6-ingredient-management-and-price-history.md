@@ -812,7 +812,7 @@ public class AddIngredientPriceHandler(IAppDbContext db)
         await db.SaveChangesAsync(ct);
 
         // TODO (L7): After price is committed, wire:
-        // 1. ICostCascadeService.RecalculateForIngredient(command.IngredientId)
+        // 1. ICostCascadeService.RecalculateForIngredientAsync(command.IngredientId, ct)
         //    → recalculates CostPerPortion on all recipes using this ingredient
         // 2. Check price spike against ingredient.PriceSpikeThresholdPct
         //    → send alert to the single user via IAlertDispatcher
@@ -1292,7 +1292,7 @@ curl -X GET "http://localhost:5000/api/ingredients"
 
 ### Deferred to L7
 
-- **Cascade recalculation** — `ICostCascadeService.RecalculateForIngredient(ingredientId)` called after price commit
+- **Cascade recalculation** — `ICostCascadeService.RecalculateForIngredientAsync(ingredientId, ct)` called after price commit
 - **Price spike alerts** — comparison against `PriceSpikeThresholdPct`, alert sent to user
 - **Recipe item constraint** — `RecipeItem.IngredientId` gets `OnDelete(Restrict)`, blocking deletion of ingredients still used in recipes
 

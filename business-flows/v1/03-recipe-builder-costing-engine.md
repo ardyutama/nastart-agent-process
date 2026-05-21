@@ -93,7 +93,7 @@ If `TargetMargin >= 1`, derived sell price is `null`.
 ## Flow 3: Auto-Cascade Recipe Cost Recalculation
 
 **Trigger:** A new `IngredientPriceHistory` row has been committed for an ingredient.
-**Interface:** `ICostCascadeService.RecalculateForIngredient(ingredientId)`
+**Interface:** `ICostCascadeService.RecalculateForIngredientAsync(ingredientId, cancellationToken)`
 
 | Step | Actor | Action | Component | Data IN | Data OUT | Decision? | Error Case |
 |---|---|---|---|---|---|---|---|

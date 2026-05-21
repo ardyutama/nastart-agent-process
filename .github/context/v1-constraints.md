@@ -230,7 +230,7 @@ public record RecipeResponse(
 
 | Decision | v1 Status | Notes |
 |---|---|---|
-| C-1 Cascade interface | ✅ Applies | `RecalculateForIngredient(ingredientId)` |
+| C-1 Cascade interface | ✅ Applies | `RecalculateForIngredientAsync(ingredientId, cancellationToken)` |
 | C-2 Cost formula | ✅ Applies | `SUM((price/unitSize)*qty*(1/yield))/portionCount` |
 | C-3 Current price lookup | ✅ Applies | `ORDER BY committed_at DESC LIMIT 1` |
 | C-4 Price timestamps | ✅ Applies | `committed_at` (system) + `effective_date` (user) |

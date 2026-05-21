@@ -10,7 +10,7 @@
 
 ## C-1 — Cascade Service Interface
 
-**Value:** `ICostCascadeService.RecalculateForIngredient(ingredientId)`
+**Value:** `ICostCascadeService.RecalculateForIngredientAsync(ingredientId, cancellationToken)`
 
 - No price parameter — the service fetches current price internally via C-3
 - Single entry point called by ALL sources: manual price update, invoice scan confirmation

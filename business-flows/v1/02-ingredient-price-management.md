@@ -15,7 +15,7 @@
 - Ingredient records belong directly to `UserId`
 - `Supplier` is not part of v1 ingredient management
 - Manual price updates append new `IngredientPriceHistory` rows; they do not update a `current_price` column
-- `ICostCascadeService.RecalculateForIngredient(ingredientId)` is the only cascade entry point
+- `ICostCascadeService.RecalculateForIngredientAsync(ingredientId, cancellationToken)` is the only cascade entry point
 - `IngredientPriceHistory.Source` is exactly `Manual` or `InvoiceScan`
 - Price spike alerts route to the single confirmed Telegram link for the current user
 
@@ -109,7 +109,7 @@ There is no `Ingredient.current_price` field in v1.
 | 2 | Nastart.Api | Loads ingredient and checks ownership | PostgreSQL | ingredientId, User.id | Ingredient | Missing ingredient -> 404 | Reject |
 | 3 | Nastart.Api | Inserts new `IngredientPriceHistory` row | PostgreSQL | ingredientId, price, unitSize snapshot, source='Manual', committedAt=NOW(), effectiveDate | IngredientPriceHistory.id | - | DB error -> 500 |
 | 4 | Nastart.Api | Calculates price change against previous history row | PostgreSQL | latest two history rows, priceSpikeThresholdPct | changePct | No previous price -> skip spike check | - |
-| 5 | Nastart.Api | Calls `ICostCascadeService.RecalculateForIngredient(ingredientId)` | Application service | ingredientId | affected recipe count | Per-recipe failure -> log `CascadeErrorLog` and continue | Service error handling per canonical decision |
+| 5 | Nastart.Api | Calls `ICostCascadeService.RecalculateForIngredientAsync(ingredientId, cancellationToken)` | Application service | ingredientId | affected recipe count | Per-recipe failure -> log `CascadeErrorLog` and continue | Service error handling per canonical decision |
 | 6 | Nastart.Api | Optionally dispatches price spike alert to confirmed Telegram link | Nastart.Api -> Python FastAPI | ingredient name, old price, new price, changePct, telegram recipient | async alert request | No confirmed link or threshold not crossed -> skip | Delivery failure can deactivate link |
 | 7 | Nastart.Api | Returns updated price history summary | Nastart.Api | latest history, cascade result | success response | - | - |
 | 8 | Vue.js | Shows latest price and cascade result | Vue.js | response DTO | refreshed ingredient detail | - | - |

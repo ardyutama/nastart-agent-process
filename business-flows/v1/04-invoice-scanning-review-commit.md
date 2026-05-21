@@ -83,7 +83,7 @@
 | 4 | Nastart.Api | Inserts `IngredientPriceHistory` rows for approved items | PostgreSQL | ingredientId, price, unitSize snapshot, source='InvoiceScan', effectiveDate, committedAt, invoice reference | price history rows | DB error -> rollback transaction | 500 |
 | 5 | Nastart.Api | Marks invoice-processing record as committed | PostgreSQL | processing id | committed status | - | DB error -> rollback transaction |
 | 6 | Nastart.Api | Commits transaction | PostgreSQL | - | committed data | - | - |
-| 7 | Nastart.Api | Outside the transaction, deduplicates ingredient ids and calls `ICostCascadeService.RecalculateForIngredient(ingredientId)` | Application service | ingredient ids | cascade results | Per-recipe failure -> log `CascadeErrorLog` and continue | Do not rollback committed price rows |
+| 7 | Nastart.Api | Outside the transaction, deduplicates ingredient ids and calls `ICostCascadeService.RecalculateForIngredientAsync(ingredientId, cancellationToken)` | Application service | ingredient ids | cascade results | Per-recipe failure -> log `CascadeErrorLog` and continue | Do not rollback committed price rows |
 | 8 | Nastart.Api | Optionally triggers price spike alerts for affected ingredients | Nastart.Api -> Python FastAPI | ingredient price change payload | async alert requests | No confirmed link or threshold not crossed -> skip | Log delivery failures |
 | 9 | Nastart.Api | Returns commit summary | Nastart.Api | committed count, affected recipes | success response | - | - |
 | 10 | Vue.js | Shows commit results | Vue.js | commit summary | updated UI | - | - |

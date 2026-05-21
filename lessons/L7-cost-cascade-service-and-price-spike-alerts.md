@@ -925,6 +925,8 @@ public sealed class ConsoleAlertDispatcher(
 
 Now we wire the cascade and spike check into the handler that commits a new ingredient price. This replaces the L6 handler that had the TODO comment.
 
+For the .NET 10 version below, system time comes from `TimeProvider` instead of direct `DateTime.UtcNow` reads so validation and timestamp creation stay deterministic in tests.
+
 **File:** `src/Nastart.Application/Features/Ingredients/Commands/AddIngredientPrice/AddIngredientPriceCommand.cs`
 
 ```csharp
@@ -994,7 +996,7 @@ namespace Nastart.Application.Features.Ingredients.Commands.AddIngredientPrice;
 
 public class AddIngredientPriceCommandValidator : AbstractValidator<AddIngredientPriceCommand>
 {
-    public AddIngredientPriceCommandValidator()
+    public AddIngredientPriceCommandValidator(TimeProvider timeProvider)
     {
         RuleFor(x => x.UserId)
             .NotEmpty().WithMessage("UserId is required.");
@@ -1006,8 +1008,8 @@ public class AddIngredientPriceCommandValidator : AbstractValidator<AddIngredien
             .GreaterThan(0).WithMessage("Price must be greater than zero.");
 
         RuleFor(x => x.EffectiveDate)
-            .LessThanOrEqualTo(DateOnly.FromDateTime(DateTime.UtcNow))
-            .When(x => x.EffectiveDate.HasValue)
+            .Must(effectiveDate => effectiveDate is null
+                || effectiveDate.Value <= DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime))
             .WithMessage("Effective date cannot be in the future.");
     }
 }
@@ -1036,6 +1038,7 @@ public class AddIngredientPriceHandler(
     IAppDbContext db,
     ICostCascadeService cascadeService,
     IPriceSpikeChecker priceSpikeChecker,
+    TimeProvider timeProvider,
     ILogger<AddIngredientPriceHandler> logger)
     : IRequestHandler<AddIngredientPriceCommand, ErrorOr<AddIngredientPriceResponse>>
 {
@@ -1043,21 +1046,24 @@ public class AddIngredientPriceHandler(
         AddIngredientPriceCommand command,
         CancellationToken cancellationToken)
     {
-        // OWASP A01: Verify the ingredient exists AND belongs to this user.
-        // Without the UserId check, any authenticated user could price any ingredient by GUID.
+        // OWASP A01: Verify the ingredient exists AND belongs to this user in one query.
         // AsNoTracking: read-only ownership check; ingredient is never modified here.
         var ingredient = await db.Ingredients
             .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == command.IngredientId, cancellationToken)
+            .FirstOrDefaultAsync(
+                i => i.Id == command.IngredientId && i.UserId == command.UserId,
+                cancellationToken)
             .ConfigureAwait(false);
 
-        if (ingredient is null || ingredient.UserId != command.UserId)
+        if (ingredient is null)
             return Error.Forbidden("Ingredient.AccessDenied", "You do not have access to this ingredient.");
+
+        var utcNow = timeProvider.GetUtcNow();
 
         // C-5: Append-only — never update or delete existing price records.
         // C-13: Source = PriceSource.Manual serialised as 'Manual' (case-sensitive)
         //        via .HasConversion<string>() in IngredientPriceHistoryConfiguration (L2).
-        // C-4: Set CommittedAt in the handler; HasDefaultValueSql("NOW()") is a DB safety net.
+        // C-4: Set CommittedAt from TimeProvider in the handler; HasDefaultValueSql("NOW()") is a DB safety net.
         // UnitSize snapshot: captures the ingredient's package unit size at this price entry's
         //   commit time. Each IngredientPriceHistory row carries its own UnitSize so that
         //   historical C-2 calculations remain accurate even if the ingredient's unit size changes.
@@ -1068,8 +1074,8 @@ public class AddIngredientPriceHandler(
             Price = command.Price,
             UnitSize = ingredient.UnitSize,    // Snapshot at commit time
             Source = PriceSource.Manual,       // C-13: exactly 'Manual'
-            CommittedAt = DateTimeOffset.UtcNow,
-            EffectiveDate = command.EffectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow)
+            CommittedAt = utcNow,
+            EffectiveDate = command.EffectiveDate ?? DateOnly.FromDateTime(utcNow.UtcDateTime)
         };
 
         db.IngredientPriceHistories.Add(priceRecord);
@@ -1121,6 +1127,7 @@ public static IServiceCollection AddApplication(this IServiceCollection services
     services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<ApplicationAssemblyMarker>());
     services.AddValidatorsFromAssemblyContaining<ApplicationAssemblyMarker>();
     services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+    services.AddSingleton<TimeProvider>(TimeProvider.System);
 
     // Phase 2: cascade + spike checker (Application layer — no infrastructure deps)
     services.AddScoped<ICostCascadeService, CostCascadeService>();
@@ -1695,7 +1702,7 @@ public sealed class PriceSpikeCheckerTests
 ```
 
 > **Key principles:**
-> - **Sealed test classes** with `[TestClass]` — required per MSTest 3.x
+> - **Sealed test classes** with `[TestClass]` — used here for consistency; MSTest 3.x does not require sealing
 > - **`CostCascadeService` constructor** takes only `db + logger` (no `IAlertDispatcher` — moved to `PriceSpikeChecker`)
 > - **`IngredientPriceHistory.UnitSize`** populated in every test so the price and package-size snapshot stay together
 > - **`[DynamicData]`** for the parameterized C-2 formula scenarios — covers three formula configurations in one test method
@@ -1705,13 +1712,14 @@ public sealed class PriceSpikeCheckerTests
 
 ## 16. Key Takeaways
 
-- **C-1:** `ICostCascadeService` is the single, locked entry point. All cost recalculations go through it. Price is never passed as a parameter — the service reads it internally (C-3).
+- **C-1:** `ICostCascadeService.RecalculateForIngredientAsync(...)` is the single, locked entry point. All cost recalculations go through it. Price is never passed as a parameter — the service reads it internally (C-3).
 - **C-2:** The cost formula uses `IngredientPriceHistory.UnitSize`, not live `Ingredient.UnitSize`. Formula: `SUM((price / latestPrice.UnitSize) × qty × (1/yield)) / portionCount`.
 - **C-3:** Current price is ALWAYS looked up fresh from `IngredientPriceHistories ORDER BY committed_at DESC` — never from a cached field on `Ingredient`.
 - **C-5:** Per-recipe cascade failures are logged to `CascadeErrorLog` and skipped. `IngredientPriceHistory` is append-only and never rolled back.
 - **SRP — `IPriceSpikeChecker` is separate from `ICostCascadeService`:** Spike detection is not part of the cost formula. Separating them lets you test each independently and swap the threshold logic in v2 without touching the cascade.
 - **Fire-and-forget is dangerous:** The original static `PriceSpikeChecker` used `_ = alertDispatcher.SendPriceSpikeAlertAsync(...)`. Replaced with awaited try-catch so dispatcher failures are logged rather than silently swallowed.
 - **Primary constructor syntax:** All service classes (`CostCascadeService`, `PriceSpikeChecker`, `ConsoleAlertDispatcher`) use C# 12 primary constructors — no boilerplate field assignments.
+- **`TimeProvider` for system timestamps:** Validators and handlers use the .NET system clock abstraction rather than direct `DateTime.UtcNow` reads, which keeps business rules deterministic in tests.
 - **`ConfigureAwait(false)`** on every async DB call — prevents deadlocks in non-ASP.NET contexts and is consistent with the dotnet-best-practices skill.
 - **v2 preserved:** `CostThresholdPercentage` (C-9), role-split alerts (C-11), sell price impact alerts (C-12) are preserved as XML `<remarks>` and `// v2-only:` comments. Nothing was deleted.
 

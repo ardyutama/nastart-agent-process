@@ -139,7 +139,7 @@ npm test
 ### Always
 - Run tests before committing
 - Validate all user input at API boundary
-- Use `ICostCascadeService.RecalculateForIngredient(ingredientId)` — never pass price as a parameter to cascade
+- Use `ICostCascadeService.RecalculateForIngredientAsync(ingredientId, cancellationToken)` — never pass price as a parameter to cascade
 - Derive current price from `IngredientPriceHistory ORDER BY committed_at DESC LIMIT 1` — never store `current_price` on `Ingredient`
 - Sell price = `(CostPerPortion + PackagingCost) / (1 - TargetMargin)` — derived at read time, never stored
 
@@ -162,7 +162,7 @@ npm test
 
 | Decision | Rule |
 |---|---|
-| C-1 | `ICostCascadeService.RecalculateForIngredient(ingredientId)` — no price param |
+| C-1 | `ICostCascadeService.RecalculateForIngredientAsync(ingredientId, cancellationToken)` — no price param |
 | C-2 | Cost formula: `SUM((price/unitSize) * quantity * (1/yield)) / portionCount` |
 | C-3 | Current price: `ORDER BY committed_at DESC LIMIT 1` on `IngredientPriceHistory` |
 | C-4 | Two timestamps: `committed_at` (system, ordering) + `effective_date` (user, business) |
