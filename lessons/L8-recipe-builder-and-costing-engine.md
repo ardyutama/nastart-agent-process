@@ -65,7 +65,7 @@
 
 > **v1 scope note (already integrated)**
 >
-> This lesson is written for the **v1 single-user** scope. v2 artifacts are preserved as `// v2-only:` comments so future migration is straightforward. Nothing in this lesson needs correction before use — the v1 design is the authoritative version.
+> This lesson is written for the **v1 single-user** scope. v2 artifacts are preserved as `// v2-only:` comments so future migration is straightforward. The v1 design is authoritative, and the snippets below should stay aligned with `AGENTS.md` and L7 as the active source of cascade and alert behavior.
 >
 > | v2 concept | Where preserved |
 > |---|---|
@@ -242,7 +242,7 @@ public record CreateRecipeCommand(
     decimal PackagingCost = 0m,
     decimal TargetMargin = 0m,
     string VersionLabel = "Standard",
-    List<CreateRecipeItemDto> RecipeItems = null!
+    IReadOnlyList<CreateRecipeItemDto> RecipeItems
 ) : IRequest<ErrorOr<CreateRecipeResponse>>;
 
 public record CreateRecipeItemDto(Guid IngredientId, decimal Quantity, decimal YieldPercentage);
@@ -380,7 +380,7 @@ public sealed class CreateRecipeHandler(IAppDbContext db, ICostCascadeService ca
         //   1. Fetch current ingredient prices (C-3)
         //   2. Apply formula (C-2) for all recipes using these ingredients
         //   3. Update Recipe.CostPerPortion in database
-        //   4. Dispatch price spike alert if threshold exceeded (C-12)
+        //   4. Leave alert dispatch to the ingredient-price commit flow from L7.
         foreach (var ingredientId in ingredientIds)
         {
             await cascade.RecalculateForIngredientAsync(ingredientId, ct)
@@ -431,10 +431,10 @@ namespace Nastart.Application.Features.Recipes.Queries.GetRecipes;
 
 // v1: single user — no role parameter needed
 public record GetRecipesQuery(Guid UserId)
-    : IRequest<ErrorOr<List<RecipeResponse>>>;
+    : IRequest<ErrorOr<IReadOnlyList<RecipeResponse>>>;
 ```
 
-### Responses (Role-split)
+### Response
 
 **File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipes/RecipeResponse.cs`
 
@@ -474,9 +474,9 @@ using Nastart.Application.Common.Interfaces;
 namespace Nastart.Application.Features.Recipes.Queries.GetRecipes;
 
 public sealed class GetRecipesHandler(IAppDbContext db)
-    : IRequestHandler<GetRecipesQuery, ErrorOr<List<RecipeResponse>>>
+    : IRequestHandler<GetRecipesQuery, ErrorOr<IReadOnlyList<RecipeResponse>>>
 {
-    public async Task<ErrorOr<List<RecipeResponse>>> Handle(
+    public async Task<ErrorOr<IReadOnlyList<RecipeResponse>>> Handle(
         GetRecipesQuery query, CancellationToken ct)
     {
         var recipes = await db.Recipes
@@ -499,7 +499,7 @@ public sealed class GetRecipesHandler(IAppDbContext db)
                 recipe.CostPerPortion, recipe.PackagingCost, recipe.TargetMargin,
                 derivedSellPrice, foodCostPct,
                 recipe.VersionNumber, recipe.VersionLabel, recipe.VersionGroupId);
-        }).ToList();
+        }).ToArray();
 
         return responses;
     }
@@ -510,7 +510,7 @@ public sealed class GetRecipesHandler(IAppDbContext db)
 
 ## 5. Feature Slice 3 — GetRecipeById
 
-Query a single recipe with RecipeItems details. Also role-split.
+Query a single recipe with item details for the authenticated single user.
 
 ### Folder structure
 
@@ -571,7 +571,7 @@ public record RecipeResponse(
     decimal TargetMargin,
     decimal? DerivedSellPrice,
     decimal? FoodCostPct,
-    List<RecipeItemDetail> Items,  // populated by GetRecipeByIdHandler; absent from list endpoint
+    IReadOnlyList<RecipeItemDetail> Items,  // populated by GetRecipeByIdHandler; absent from list endpoint
     int VersionNumber,
     string VersionLabel,
     Guid VersionGroupId
@@ -600,10 +600,10 @@ public sealed class GetRecipeByIdHandler(IAppDbContext db)
             .AsNoTracking()
             .Include(r => r.RecipeItems)
             .ThenInclude(ri => ri.Ingredient)
-            .FirstOrDefaultAsync(r => r.Id == query.RecipeId, ct)
+            .FirstOrDefaultAsync(r => r.Id == query.RecipeId && r.UserId == query.UserId, ct)
             .ConfigureAwait(false);
 
-        if (recipe is null || recipe.UserId != query.UserId)
+        if (recipe is null)
             return Error.NotFound("Recipe.NotFound",
                 "Recipe not found or doesn't belong to this user.");
 
@@ -633,7 +633,7 @@ public sealed class GetRecipeByIdHandler(IAppDbContext db)
                 recipeItem.YieldPercentage,
                 currentPrice
             );
-        }).ToList();
+        }).ToArray();
 
         decimal? derivedSellPrice = recipe.TargetMargin < 1m
             ? (recipe.CostPerPortion + recipe.PackagingCost) / (1m - recipe.TargetMargin)
@@ -1205,14 +1205,14 @@ public sealed class UpdateRecipeHandler(IAppDbContext db, ICostCascadeService ca
 
 ## 10. RecipeEndpoints
 
-All 7 slices wired to Minimal API endpoints. Extract role from JWT claims.
+All 7 slices wired to Minimal API endpoints. Resolve the authenticated user from JWT claims via the existing `GetUserId()` extension.
 
 ### Request DTOs (for minimal API binding)
 
-**File:** `src/Nastart.API/Contracts/Recipe/CreateRecipeRequest.cs`
+**File:** `src/Nastart.Api/Contracts/Recipe/CreateRecipeRequest.cs`
 
 ```csharp
-namespace Nastart.API.Contracts.Recipe;
+namespace Nastart.Api.Contracts.Recipe;
 
 public record CreateRecipeRequest(
     string Name,
@@ -1220,7 +1220,7 @@ public record CreateRecipeRequest(
     decimal PackagingCost = 0m,
     decimal TargetMargin = 0m,
     string VersionLabel = "Standard",
-    List<CreateRecipeItemRequest> RecipeItems = null!
+    IReadOnlyList<CreateRecipeItemRequest> RecipeItems
 );
 
 public record CreateRecipeItemRequest(Guid IngredientId, decimal Quantity, decimal YieldPercentage);
@@ -1240,13 +1240,12 @@ public record CreateRecipeVersionRequest(string VersionLabel);
 
 ### Endpoints
 
-**File:** `src/Nastart.API/Endpoints/RecipeEndpoints.cs`
+**File:** `src/Nastart.Api/Endpoints/RecipeEndpoints.cs`
 
 ```csharp
-using System.Security.Claims;
 using MediatR;
-using Nastart.API.Contracts.Recipe;
-using Nastart.API.Extensions;
+using Nastart.Api.Contracts.Recipe;
+using Nastart.Api.Extensions;
 using Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
 using Nastart.Application.Features.Recipes.Commands.CreateRecipe;
 using Nastart.Application.Features.Recipes.Commands.CreateRecipeVersion;
@@ -1255,7 +1254,7 @@ using Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
 using Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 using Nastart.Application.Features.Recipes.Queries.GetRecipes;
 
-namespace Nastart.API.Endpoints;
+namespace Nastart.Api.Endpoints;
 
 public static class RecipeEndpoints
 {
@@ -1329,7 +1328,7 @@ public static class RecipeEndpoints
             request.TargetMargin,
             request.VersionLabel,
             request.RecipeItems.Select(r => new CreateRecipeItemDto(
-                r.IngredientId, r.Quantity, r.YieldPercentage)).ToList()
+                r.IngredientId, r.Quantity, r.YieldPercentage)).ToArray()
         );
 
         var result = await sender.Send(command, ct);
@@ -1405,7 +1404,7 @@ public static class RecipeEndpoints
 
 ### Register endpoints in Program.cs
 
-Update `src/Nastart.API/Program.cs` to keep authorization enabled and map the recipe endpoints:
+Update `src/Nastart.Api/Program.cs` to keep authorization enabled and map the recipe endpoints:
 
 ```csharp
 // Keep the L5 authorization setup in place, then register endpoint handler:
@@ -1588,10 +1587,10 @@ CreateRecipe Handler
           ├─ Fetch current price (C-3)
           ├─ Find all Recipes using this IngredientId
           ├─ Apply formula (C-2) per recipe
-          ├─ Update Recipe.CostPerPortion
-          └─ Dispatch price spike alert if threshold exceeded
-                └─ Alert target: single user (userId) via IAlertDispatcher
-                   (v1: no role-split; C-10/C-12 are v2-only)
+          └─ Update Recipe.CostPerPortion
+
+Alert dispatch remains in the ingredient price-commit flow from L7.
+Recipe handlers trigger cascade only; they do not send alerts directly.
 
 Result: Recipe.CostPerPortion is ALWAYS server-authoritative, computed post-save.
         No client-side estimation is ever persisted.
@@ -1609,7 +1608,7 @@ Result: Recipe.CostPerPortion is ALWAYS server-authoritative, computed post-save
 | **C-3** | Current price always fetched using: `SELECT price FROM ingredient_price_histories WHERE ingredient_id = @id ORDER BY committed_at DESC LIMIT 1` |
 | **C-9** | `Recipe.CostThresholdPercentage` is removed in v1 — no stored threshold; personal Telegram spike alerts added in Phase 4 (L15) |
 | **C-10** | Unified `RecipeResponse` — single user sees all fields (including `Items` on detail endpoint). Role-split DTOs are v2-only (`// v2-only:` stubs preserved in `RecipeResponse.cs`). |
-| **C-12** | Cost threshold alert removed in v1 — no stored threshold. Spike alerts dispatched via `IAlertDispatcher.SendPriceSpikeAlertAsync(userId, ...)` |
+| **C-12** | v2-only for this lesson — recipe handlers do not dispatch alerts. L7 ingredient price commits own price-spike alert dispatch via `IPriceSpikeChecker` and `IAlertDispatcher`. |
 
 ---
 
@@ -1623,11 +1622,11 @@ Across L6–L8, you now have:
 | Ingredient price history + current price lookup (C-3) | ✅ (L7) |
 | CostCascadeService + canonical formula (C-2) | ✅ (L7) |
 | Recipe creation with automatic cost computation | ✅ (L8) |
-| Recipe queries with unified `RecipeResponse` (C-10 v2-preview) | ✅ (L8) |
+| Recipe queries with unified `RecipeResponse` for the single user | ✅ (L8) |
 | Recipe items: add, remove (cascade triggered) | ✅ (L8) |
 | Recipe versioning (independent live versions) | ✅ (L8) |
 | 7 complete vertical slices + REST endpoints | ✅ (L8) |
-| All canonical decisions (C-1, C-2, C-3, C-9, C-10, C-12) enforced | ✅ |
+| Active v1 recipe decisions (C-1, C-2, C-3) enforced; v2-only decision stubs preserved for C-9, C-10, C-12 | ✅ |
 
 ### Deferred to later phases
 
@@ -1788,10 +1787,11 @@ public sealed class DerivedSellPriceTests
 ```
 
 > **Key principles:**
-> - **Sealed test classes** — `sealed` is required per MSTest 3.x best practices
+> - **Sealed test classes** — used here for consistency; MSTest 3.x does not require sealing
 > - **`[DataRow]` for formula tests** — same formula, different inputs: data-driven over copy-paste tests
 > - **Assert on values** — check `CostPerPortion`, `DerivedSellPrice`, and recipe scoping; never assert on cascade mock invocation counts
 > - **Isolate formula tests** — `DerivedSellPriceTests` has no DB dependency; it's fast and deterministic
+> - **Use one captured clock value per test when seeding timestamps** — `TimeProvider.System.GetUtcNow()` keeps setup deterministic and avoids split-second drift between `CommittedAt` and `EffectiveDate`
 > - **One In-Memory DB per test** — `Guid.NewGuid().ToString()` as database name prevents inter-test state pollution
 
 **File:** `tests/Nastart.Application.Tests/Features/Recipes/GetRecipeByIdHandlerTests.cs`
@@ -1817,6 +1817,7 @@ public sealed class GetRecipeByIdHandlerTests
         var userId = Guid.NewGuid();
         var recipeId = Guid.NewGuid();
         var ingredientId = Guid.NewGuid();
+        var utcNow = TimeProvider.System.GetUtcNow();
 
         db.Ingredients.Add(new Ingredient
             { Id = ingredientId, UserId = userId, Name = "Flour", UnitSize = 1000m });
@@ -1834,8 +1835,8 @@ public sealed class GetRecipeByIdHandlerTests
         db.IngredientPriceHistories.Add(new IngredientPriceHistory
         {
             Id = Guid.NewGuid(), IngredientId = ingredientId, Price = 2.50m,
-            UnitSize = 1000m, Source = PriceSource.Manual, CommittedAt = DateTimeOffset.UtcNow,
-            EffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow)
+            UnitSize = 1000m, Source = PriceSource.Manual, CommittedAt = utcNow,
+            EffectiveDate = DateOnly.FromDateTime(utcNow.UtcDateTime)
         });
         await db.SaveChangesAsync();
 
@@ -2140,13 +2141,13 @@ public sealed class AddRecipeItemHandlerTests
 
 After completing L6, L7, and L8, your `Program.cs` should look like this. Every service registration, middleware, and endpoint map accumulated across L3–L8 is assembled here.
 
-**File:** `src/Nastart.API/Program.cs`
+**File:** `src/Nastart.Api/Program.cs`
 
 ```csharp
 using Nastart.Application;
 using Nastart.Infrastructure;
-using Nastart.API.Endpoints;
-using Nastart.API.Middleware;
+using Nastart.Api.Endpoints;
+using Nastart.Api.Middleware;
 using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
