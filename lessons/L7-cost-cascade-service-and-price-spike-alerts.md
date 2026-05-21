@@ -4,7 +4,7 @@
 > - How to introduce 3 new Phase 2 entities: Recipe, RecipeItem, CascadeErrorLog
 > - Why ICostCascadeService belongs in the Application layer, not Infrastructure
 > - How to implement the canonical cost formula with unit normalization and yield adjustment
-> - How to dispatch personal cost alerts (price spike, sell price impact) to a single user
+> - How to dispatch personal price spike alerts to a single user while preserving sell price impact alerts as v2-only extension points
 > - How to handle per-recipe cascade failures without rolling back committed price history
 >
 > **Out of scope for this lesson:**
@@ -20,7 +20,7 @@
 > | `CostThresholdPercentage` (per-Recipe C-9) | `Recipe` XML `<remarks>` + EF config comment |
 > | Role-split alert payloads (C-11, C-12) | `IAlertDispatcher` commented methods |
 > | `SendCostThresholdAlertAsync` | `IAlertDispatcher` + `ConsoleAlertDispatcher` commented stubs |
-> | `PriceSpikeThresholdPct` (per-Ingredient) | `IPriceSpikeChecker` remarks — v1 uses a 10% constant |
+> | `PriceSpikeThresholdPct` (per-Ingredient) | `IPriceSpikeChecker` remarks — v1 reads the per-ingredient threshold; `null` or `0` disables alerts |
 
 ---
 
@@ -303,7 +303,7 @@ public sealed class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
 
         // FK to user — cascade delete: deleting the user deletes all their recipes
         entity.HasOne(r => r.User)
-            .WithMany(u => u.Recipes)
+            .WithMany()
             .HasForeignKey(r => r.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
@@ -408,9 +408,9 @@ public sealed class CascadeErrorLogConfiguration : IEntityTypeConfiguration<Casc
 Run these commands to create and apply the migration:
 
 ```bash
-dotnet ef migrations add AddPhase2RecipeEntities --project src/Nastart.Infrastructure --startup-project src/Nastart.API
+dotnet ef migrations add AddPhase2RecipeEntities --project src/Nastart.Infrastructure --startup-project src/Nastart.Api
 
-dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.API
+dotnet ef database update --project src/Nastart.Infrastructure --startup-project src/Nastart.Api
 ```
 
 ---
@@ -465,6 +465,8 @@ public interface ICostCascadeService
 /// </param>
 public record CascadeResult(int AffectedRecipes, int FailedRecipes);
 ```
+
+> **TDD first:** Before implementing the code in Sections 8-13, add the tests from Section 15, run the targeted failing cases, and then use the snippets below as the smallest change that makes them pass.
 
 ---
 
@@ -559,7 +561,9 @@ public sealed class CostCascadeService(
                     recipeId,
                     ingredientId);
 
-                // C-5: Append an audit record — do not let a logging failure block other recipes
+                // C-5 sample: attempt to append an audit record and continue.
+                // If this DbContext is already faulted, use a fresh context or dedicated
+                // audit writer in production-hardening so the log write has its own boundary.
                 db.CascadeErrorLogs.Add(new CascadeErrorLog
                 {
                     Id = Guid.NewGuid(),
@@ -619,6 +623,8 @@ public sealed class CostCascadeService(
         decimal totalCost = 0m;
 
         // C-2 formula: item_cost = (price / latestPrice.UnitSize) × Quantity × (1 / YieldPercentage)
+        // Every recipe item must have a latest price row. Missing price data is treated as a
+        // recipe-level failure so the service never persists a partial CostPerPortion.
         // The price and unit-size snapshot come from the same latest price-history row.
         // Example (100/10) × 2 × (1/0.85) = 23.5294 (rounded to 4dp):
         //   price = 100, latestPrice.UnitSize = 10 kg, Quantity = 2 kg, YieldPercentage = 0.85
@@ -627,11 +633,8 @@ public sealed class CostCascadeService(
             if (!latestPrices.TryGetValue(item.IngredientId, out var latestPrice)
                 || latestPrice is null)
             {
-                logger.LogWarning(
-                    "Ingredient {IngredientId} in recipe {RecipeId} has no price history — skipping item cost",
-                    item.IngredientId,
-                    recipeId);
-                continue;
+                throw new InvalidOperationException(
+                    $"Ingredient {item.IngredientId} in recipe {recipeId} has no price history.");
             }
 
             if (latestPrice.UnitSize <= 0m)
@@ -673,6 +676,8 @@ public sealed class CostCascadeService(
     }
 }
 ```
+
+> **Durability note:** This sample keeps the recipe recalculation and `CascadeErrorLog` write on the same `IAppDbContext` to keep the lesson focused. That means the audit insert is still best-effort if the current context or database connection is already faulted. If you need stronger durability, persist the error log through a fresh context or dedicated audit writer.
 
 ---
 
@@ -1012,7 +1017,7 @@ public class AddIngredientPriceCommandValidator : AbstractValidator<AddIngredien
 
 This is the handler that was waiting for L7. It now:
 1. Verifies ingredient exists and belongs to this user (OWASP A01)
-2. Commits new `IngredientPriceHistory` (C-3: the signal for "new price"; C-4: `CommittedAt` set by DB)
+2. Commits new `IngredientPriceHistory` (C-3: the signal for "new price"; C-4: `CommittedAt` written in the handler as the system timestamp, with the DB default kept as a safety net)
 3. Checks for price spike via `IPriceSpikeChecker` (non-fatal — alert failure never rolls back the price)
 4. Calls cascade service to recalculate all affected recipes (C-1)
 
@@ -1200,8 +1205,8 @@ public static IServiceCollection AddInfrastructure(
    Recipe now shows `cost_per_portion = 6.15` (updated!)
 
 6. **Verify cascade error logging works:**
-   - Manually insert a recipe with a deleted ingredient reference (simulate data corruption)
-   - Run cascade: errors should be logged to `CascadeErrorLogs` table, not crash
+    - In a non-production test database, seed an invalid latest price-history row with `unit_size = 0` for one ingredient, or a recipe item with `YieldPercentage = 0`
+    - Run cascade: errors should be logged to `CascadeErrorLogs` table, not crash
 
 7. **Check IngredientPriceHistory table:**
    ```sql
@@ -1215,9 +1220,11 @@ public static IServiceCollection AddInfrastructure(
 
 ## 15. Testing the Cascade Service
 
-> Use MSTest 3.x with the EF Core In-Memory provider to unit-test `CostCascadeService`. Use NSubstitute for `IAlertDispatcher` and `ILogger<T>`. Assert on **outcome values** (`CostPerPortion`, `CascadeResult` counts, `CascadeErrorLog` presence) — not on mock call counts.
+> **TDD:** Write these tests first, run the targeted failing cases, and then implement the code in Sections 8-13.
 >
-> **Why In-Memory instead of NSubstitute for `IAppDbContext`?** The `latestPrices` batch query uses `GroupBy + OrderBy + Select + ToDictionaryAsync`, which EF Core's LINQ provider must translate. NSubstitute cannot fake this translation. The EF Core In-Memory provider executes the same LINQ in-process with no mocking ceremony.
+> Use MSTest 3.x with the EF Core In-Memory provider for fast, behavior-focused tests around `CostCascadeService`. Use NSubstitute for `IAlertDispatcher` and `ILogger<T>`. Assert on **outcome values** (`CostPerPortion`, `CascadeResult` counts, `CascadeErrorLog` presence) — not on mock call counts.
+>
+> **Why In-Memory instead of NSubstitute for `IAppDbContext`?** The `latestPrices` batch query uses `GroupBy + OrderBy + Select + ToDictionaryAsync`, and NSubstitute cannot fake that LINQ behavior cleanly. The EF Core In-Memory provider executes the same LINQ in-process with no mocking ceremony, but it does **not** validate relational translation or PostgreSQL/Npgsql behavior. Keep at least one relational integration test for the latest-price and previous-price query shapes.
 
 ### Project Setup
 
