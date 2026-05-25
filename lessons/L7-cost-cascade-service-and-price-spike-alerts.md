@@ -1124,10 +1124,18 @@ public class AddIngredientPriceHandler(
 // Application/DependencyInjection.cs
 public static IServiceCollection AddApplication(this IServiceCollection services)
 {
-    services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<ApplicationAssemblyMarker>());
-    services.AddValidatorsFromAssemblyContaining<ApplicationAssemblyMarker>();
-    services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
-    services.AddSingleton<TimeProvider>(TimeProvider.System);
+    var assembly = typeof(DependencyInjection).Assembly;
+
+    services.AddMediatR(cfg =>
+    {
+        cfg.RegisterServicesFromAssembly(assembly);
+
+        // L4: keep the validation pipeline behavior wired for every handler
+        cfg.AddOpenBehavior(typeof(ValidationBehavior<,>));
+    });
+
+    // L4: keep scanning validators from the Application assembly
+    services.AddValidatorsFromAssembly(assembly);
 
     // Phase 2: cascade + spike checker (Application layer — no infrastructure deps)
     services.AddScoped<ICostCascadeService, CostCascadeService>();
@@ -1142,6 +1150,23 @@ public static IServiceCollection AddInfrastructure(
     IConfiguration configuration,
     IHostEnvironment environment)
 {
+    var connectionString = configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException(
+            "Connection string 'DefaultConnection' is missing. " +
+            "Add it to appsettings.Development.json (gitignored — never commit).");
+
+    services.AddDbContext<AppDbContext>(options =>
+        options.UseNpgsql(
+            connectionString,
+            npgsqlOptions => npgsqlOptions.MigrationsAssembly(
+                typeof(AppDbContext).Assembly.GetName().Name))
+        .UseSnakeCaseNamingConvention());
+
+    // L2: handlers depend on IAppDbContext, not AppDbContext directly
+    services.AddScoped<IAppDbContext>(provider =>
+        provider.GetRequiredService<AppDbContext>());
+
+    // L5: auth and email services
     services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
     services.AddScoped<ITokenService, JwtTokenService>();
 
