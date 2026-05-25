@@ -1252,11 +1252,13 @@ public static IServiceCollection AddInfrastructure(
 
 ## 15. Testing the Cascade Service
 
-> **TDD:** Write these tests first, run the targeted failing cases, and then implement the code in Sections 8-13.
+> Follow the repo's TDD loop for every behavior in this lesson: write the smallest failing test first, run that targeted test to confirm the failure, implement the minimum fix, rerun the targeted test, then run the broader test project as verification.
 >
-> Use MSTest 3.x with the EF Core In-Memory provider for fast, behavior-focused tests around `CostCascadeService`. Use NSubstitute for `IAlertDispatcher` and `ILogger<T>`. Assert on **outcome values** (`CostPerPortion`, `CascadeResult` counts, `CascadeErrorLog` presence) — not on mock call counts.
+> Use MSTest 3.x with PostgreSQL Testcontainers for any test that exercises `AppDbContext`, EF Core query translation, migrations, defaults, precision, or relational constraints. Keep pure unit tests for arithmetic-only logic. Use NSubstitute only for external ports such as `IAlertDispatcher` and `ILogger<T>`. Assert on **outcome values** (`CostPerPortion`, `CascadeResult` counts, `CascadeErrorLog` presence) — not on mock call counts.
 >
-> **Why In-Memory instead of NSubstitute for `IAppDbContext`?** The `latestPrices` batch query uses `GroupBy + OrderBy + Select + ToDictionaryAsync`, and NSubstitute cannot fake that LINQ behavior cleanly. The EF Core In-Memory provider executes the same LINQ in-process with no mocking ceremony, but it does **not** validate relational translation or PostgreSQL/Npgsql behavior. Keep at least one relational integration test for the latest-price and previous-price query shapes.
+> **Why Testcontainers instead of EF Core InMemory?** The `latestPrices` batch query uses `GroupBy + OrderBy + Select + ToDictionaryAsync`, and `PriceSpikeChecker` relies on provider-accurate ordering via `Skip(1)`. EF Core InMemory cannot validate PostgreSQL SQL translation, migrations, defaults, or relational behavior. A PostgreSQL 18 Testcontainer executes the real Npgsql provider and makes these tests portable across machines with a local container runtime.
+>
+> **Prerequisite:** Docker Desktop, Rancher Desktop, or Podman with a Docker-compatible socket must be available before `dotnet test`. If the container runtime is unavailable, report that blocker instead of silently falling back to EF Core InMemory.
 
 ### Project Setup
 
@@ -1269,14 +1271,76 @@ public static IServiceCollection AddInfrastructure(
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.2" />
     <PackageReference Include="NSubstitute" Version="5.*" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.*" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.12.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nastart.Application\Nastart.Application.csproj" />
     <ProjectReference Include="..\..\src\Nastart.Infrastructure\Nastart.Infrastructure.csproj" />
   </ItemGroup>
 </Project>
+```
+
+### Shared PostgreSQL Fixture
+
+**File:** `tests/Nastart.Application.Tests/Infrastructure/PostgreSqlTestDatabase.cs`
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using Nastart.Infrastructure.Persistence;
+using Testcontainers.PostgreSql;
+
+namespace Nastart.Application.Tests.Infrastructure;
+
+/// <summary>
+/// Starts one PostgreSQL container per test class and creates a fresh database per test.
+/// Each test database is migrated before use so EF Core runs against the real provider.
+/// </summary>
+public sealed class PostgreSqlTestDatabase : IAsyncDisposable
+{
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
+        .WithImage("postgres:18-alpine")
+        .WithDatabase("postgres")
+        .WithUsername("postgres")
+        .WithPassword("postgres")
+        .Build();
+
+    public Task InitializeAsync() => _container.StartAsync();
+
+    public async Task<AppDbContext> CreateDbContextAsync()
+    {
+        var databaseName = $"test_{Guid.NewGuid():N}";
+
+        await using (var adminConnection = new NpgsqlConnection(_container.GetConnectionString()))
+        {
+            await adminConnection.OpenAsync();
+
+            await using var createDatabase = adminConnection.CreateCommand();
+            createDatabase.CommandText = $"CREATE DATABASE \"{databaseName}\";";
+            await createDatabase.ExecuteNonQueryAsync();
+        }
+
+        var connectionStringBuilder = new NpgsqlConnectionStringBuilder(_container.GetConnectionString())
+        {
+            Database = databaseName
+        };
+
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql(
+                connectionStringBuilder.ConnectionString,
+                npgsql => npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.GetName().Name))
+            .UseSnakeCaseNamingConvention()
+            .Options;
+
+        var db = new AppDbContext(options);
+        await db.Database.MigrateAsync();
+        return db;
+    }
+
+    public ValueTask DisposeAsync() => _container.DisposeAsync();
+}
 ```
 
 ### CostCascadeServiceTests
@@ -1288,20 +1352,22 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Nastart.Application.Services;
+using Nastart.Application.Tests.Infrastructure;
 using Nastart.Domain.Entities;
 using Nastart.Domain.Enums;
-using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Services;
 
 [TestClass]
 public sealed class CostCascadeServiceTests
 {
-    // Each test gets an isolated DB — Guid.NewGuid() name prevents cross-test state pollution
-    private static AppDbContext CreateDb() =>
-        new(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options);
+    private static readonly PostgreSqlTestDatabase Database = new();
+
+    [ClassInitialize]
+    public static Task ClassInitialize(TestContext _) => Database.InitializeAsync();
+
+    [ClassCleanup]
+    public static Task ClassCleanup() => Database.DisposeAsync().AsTask();
 
     // ─────────────────────────────────────────────────────────────────────────
     // C-2 formula: cost_per_portion = SUM((price / priceHistory.UnitSize) * qty * (1 / yield)) / portions
@@ -1324,7 +1390,7 @@ public sealed class CostCascadeServiceTests
         decimal price, decimal unitSize, decimal quantity, decimal yieldPct, int portionCount, decimal expectedCost)
     {
         // Arrange
-        using var db = CreateDb();
+        await using var db = await Database.CreateDbContextAsync();
         var ingredientId = Guid.NewGuid();
         var recipeId     = Guid.NewGuid();
         var userId       = Guid.NewGuid();
@@ -1378,7 +1444,7 @@ public sealed class CostCascadeServiceTests
     public async Task RecalculateForIngredientAsync_WhenMultipleIngredientsInRecipe_SumsAllItemCosts()
     {
         // Arrange
-        using var db = CreateDb();
+        await using var db = await Database.CreateDbContextAsync();
         var flourId  = Guid.NewGuid();
         var butterId = Guid.NewGuid();
         var recipeId = Guid.NewGuid();
@@ -1440,7 +1506,7 @@ public sealed class CostCascadeServiceTests
     public async Task RecalculateForIngredientAsync_WhenPortionCountIsZero_SetsCostToZero()
     {
         // Arrange
-        using var db = CreateDb();
+        await using var db = await Database.CreateDbContextAsync();
         var ingredientId = Guid.NewGuid();
         var recipeId     = Guid.NewGuid();
         var userId       = Guid.NewGuid();
@@ -1489,7 +1555,7 @@ public sealed class CostCascadeServiceTests
     public async Task RecalculateForIngredientAsync_WhenNoPriceHistory_ReturnsZeroCounts()
     {
         // Arrange
-        using var db = CreateDb();
+        await using var db = await Database.CreateDbContextAsync();
         var sut = new CostCascadeService(db, Substitute.For<ILogger<CostCascadeService>>());
 
         // Act
@@ -1508,7 +1574,7 @@ public sealed class CostCascadeServiceTests
     public async Task RecalculateForIngredientAsync_WhenOneRecipeFails_LogsErrorAndContinuesOthers()
     {
         // Arrange
-        using var db = CreateDb();
+        await using var db = await Database.CreateDbContextAsync();
         var ingredientId = Guid.NewGuid();
         var userId       = Guid.NewGuid();
 
@@ -1581,24 +1647,26 @@ public sealed class CostCascadeServiceTests
 **File:** `tests/Nastart.Application.Tests/Services/PriceSpikeCheckerTests.cs`
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Services;
+using Nastart.Application.Tests.Infrastructure;
 using Nastart.Domain.Entities;
 using Nastart.Domain.Enums;
-using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Services;
 
 [TestClass]
 public sealed class PriceSpikeCheckerTests
 {
-    private static AppDbContext CreateDb() =>
-        new(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options);
+    private static readonly PostgreSqlTestDatabase Database = new();
+
+    [ClassInitialize]
+    public static Task ClassInitialize(TestContext _) => Database.InitializeAsync();
+
+    [ClassCleanup]
+    public static Task ClassCleanup() => Database.DisposeAsync().AsTask();
 
     // ─────────────────────────────────────────────────────────────────────────
     // First price entry — Skip(1) yields no previous record → no spike possible
@@ -1607,7 +1675,7 @@ public sealed class PriceSpikeCheckerTests
     public async Task CheckAndDispatch_WhenFirstPriceEntry_DoesNotDispatchAlert()
     {
         // Arrange
-        using var db = CreateDb();
+        await using var db = await Database.CreateDbContextAsync();
         var ingredientId = Guid.NewGuid();
         var userId       = Guid.NewGuid();
 
@@ -1643,7 +1711,7 @@ public sealed class PriceSpikeCheckerTests
     public async Task CheckAndDispatch_WhenPriceChangeBelowOrAtThreshold_DoesNotDispatchAlert()
     {
         // Arrange
-        using var db = CreateDb();
+        await using var db = await Database.CreateDbContextAsync();
         var ingredientId = Guid.NewGuid();
         var userId       = Guid.NewGuid();
 
@@ -1686,7 +1754,7 @@ public sealed class PriceSpikeCheckerTests
     public async Task CheckAndDispatch_WhenPriceChangeExceedsThreshold_DispatchesAlertWithCorrectValues()
     {
         // Arrange
-        using var db = CreateDb();
+        await using var db = await Database.CreateDbContextAsync();
         var ingredientId = Guid.NewGuid();
         var userId       = Guid.NewGuid();
 

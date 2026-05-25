@@ -116,6 +116,9 @@ npm test
 - Before adding or changing business logic, write or update the lowest-level test that captures the expected behavior. Run that targeted test and confirm it fails for the right reason before implementing.
 - Implement the smallest domain/application change needed to pass the failing test. Refactor only after the test is green.
 - Prefer unit tests for pure domain rules, value calculations, validators, handlers, and services. Use integration tests when behavior depends on EF Core queries, database constraints, transactions, or API pipeline behavior.
+- For any test that touches `DbContext`, EF Core query translation, migrations, relational constraints, or Npgsql/PostgreSQL behavior, prefer PostgreSQL Testcontainers over EF Core InMemory or SQLite so the test exercises the real provider used in production.
+- Reserve no-database tests for pure calculations, validators, mapping, and other logic that does not depend on relational behavior. If a test needs SQL semantics, treat it as an integration test and run it against the containerized PostgreSQL instance.
+- Containerized test runs require a local container runtime (Docker Desktop, Rancher Desktop, or Podman with a Docker-compatible socket). If it is unavailable, report that environment blocker explicitly instead of substituting EF Core InMemory.
 - For bugs, use the Prove-It pattern: reproduce the bug with a failing test, then fix the implementation, then prove the test passes.
 - Do not remove, weaken, skip, or rewrite failing tests just to make the suite pass. If a test is wrong, explain why and update it to assert the correct business rule.
 - If no suitable test project or test framework exists, stop before adding dependencies and ask whether to create the missing test infrastructure.

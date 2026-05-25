@@ -1641,29 +1641,35 @@ Across L6–L8, you now have:
 
 ## 15. Testing Recipe Handlers
 
-> Use MSTest 3.x with the EF Core In-Memory provider. Assert on **response values** (`CostPerPortion`, recipe name, `DerivedSellPrice`) — not on mock call counts.
+> Use MSTest 3.x with PostgreSQL Testcontainers for any handler test that touches `DbContext`, query translation, or relational behavior. Reuse the `PostgreSqlTestDatabase` fixture introduced in L7. Keep pure arithmetic checks such as `DerivedSellPriceTests` as no-database unit tests. Assert on **response values** (`CostPerPortion`, recipe name, `DerivedSellPrice`) — not on mock call counts.
 
 ### Key Test Cases
 
 **File:** `tests/Nastart.Application.Tests/Features/Recipes/GetRecipesHandlerTests.cs`
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using Nastart.Application.Features.Recipes.Queries.GetRecipes;
+using Nastart.Application.Tests.Infrastructure;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
 [TestClass]
 public sealed class GetRecipesHandlerTests
 {
+    private static readonly PostgreSqlTestDatabase Database = new();
+
+    [ClassInitialize]
+    public static Task ClassInitialize(TestContext _) => Database.InitializeAsync();
+
+    [ClassCleanup]
+    public static Task ClassCleanup() => Database.DisposeAsync().AsTask();
+
     [TestMethod]
     public async Task Handle_ReturnsOnlyCurrentUserRecipes()
     {
         // Arrange
-        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await using var db = await Database.CreateDbContextAsync();
 
         var userId = Guid.NewGuid();
         var otherUserId = Guid.NewGuid();
@@ -1689,24 +1695,30 @@ public sealed class GetRecipesHandlerTests
 **File:** `tests/Nastart.Application.Tests/Features/Recipes/CreateRecipeHandlerTests.cs`
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Features.Recipes.Commands.CreateRecipe;
+using Nastart.Application.Tests.Infrastructure;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
 [TestClass]
 public sealed class CreateRecipeHandlerTests
 {
+    private static readonly PostgreSqlTestDatabase Database = new();
+
+    [ClassInitialize]
+    public static Task ClassInitialize(TestContext _) => Database.InitializeAsync();
+
+    [ClassCleanup]
+    public static Task ClassCleanup() => Database.DisposeAsync().AsTask();
+
     [TestMethod]
     public async Task Handle_NewRecipe_HasZeroCostPerPortionBeforeCascadeRuns()
     {
         // Arrange
-        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await using var db = await Database.CreateDbContextAsync();
 
         var userId = Guid.NewGuid();
         var ingredientId = Guid.NewGuid();
@@ -1792,27 +1804,33 @@ public sealed class DerivedSellPriceTests
 > - **Assert on values** — check `CostPerPortion`, `DerivedSellPrice`, and recipe scoping; never assert on cascade mock invocation counts
 > - **Isolate formula tests** — `DerivedSellPriceTests` has no DB dependency; it's fast and deterministic
 > - **Use one captured clock value per test when seeding timestamps** — `TimeProvider.System.GetUtcNow()` keeps setup deterministic and avoids split-second drift between `CommittedAt` and `EffectiveDate`
-> - **One In-Memory DB per test** — `Guid.NewGuid().ToString()` as database name prevents inter-test state pollution
+> - **One migrated PostgreSQL database per test** — `PostgreSqlTestDatabase.CreateDbContextAsync()` keeps tests isolated while still exercising the real Npgsql provider
 
 **File:** `tests/Nastart.Application.Tests/Features/Recipes/GetRecipeByIdHandlerTests.cs`
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using Nastart.Application.Features.Recipes.Queries.GetRecipeById;
+using Nastart.Application.Tests.Infrastructure;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
 [TestClass]
 public sealed class GetRecipeByIdHandlerTests
 {
+    private static readonly PostgreSqlTestDatabase Database = new();
+
+    [ClassInitialize]
+    public static Task ClassInitialize(TestContext _) => Database.InitializeAsync();
+
+    [ClassCleanup]
+    public static Task ClassCleanup() => Database.DisposeAsync().AsTask();
+
     [TestMethod]
     public async Task Handle_ReturnsItemDetails_WithCurrentPrices()
     {
         // Arrange
-        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await using var db = await Database.CreateDbContextAsync();
 
         var userId = Guid.NewGuid();
         var recipeId = Guid.NewGuid();
@@ -1856,8 +1874,7 @@ public sealed class GetRecipeByIdHandlerTests
     public async Task Handle_WrongUser_ReturnsNotFound()
     {
         // Arrange
-        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await using var db = await Database.CreateDbContextAsync();
 
         var ownerUserId = Guid.NewGuid();
         var attackerUserId = Guid.NewGuid();
@@ -1885,18 +1902,25 @@ public sealed class GetRecipeByIdHandlerTests
 **File:** `tests/Nastart.Application.Tests/Features/Recipes/CreateRecipeVersionHandlerTests.cs`
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Features.Recipes.Commands.CreateRecipeVersion;
+using Nastart.Application.Tests.Infrastructure;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
 [TestClass]
 public sealed class CreateRecipeVersionHandlerTests
 {
+    private static readonly PostgreSqlTestDatabase Database = new();
+
+    [ClassInitialize]
+    public static Task ClassInitialize(TestContext _) => Database.InitializeAsync();
+
+    [ClassCleanup]
+    public static Task ClassCleanup() => Database.DisposeAsync().AsTask();
+
     private static ICostCascadeService MakeCascadeStub()
     {
         var stub = Substitute.For<ICostCascadeService>();
@@ -1909,8 +1933,7 @@ public sealed class CreateRecipeVersionHandlerTests
     public async Task Handle_NewVersion_SharesSameVersionGroupId()
     {
         // Arrange
-        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await using var db = await Database.CreateDbContextAsync();
 
         var userId = Guid.NewGuid();
         var sourceId = Guid.NewGuid();
@@ -1947,8 +1970,7 @@ public sealed class CreateRecipeVersionHandlerTests
     public async Task Handle_NewVersion_HasIncrementedVersionNumber()
     {
         // Arrange
-        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await using var db = await Database.CreateDbContextAsync();
 
         var userId = Guid.NewGuid();
         var sourceId = Guid.NewGuid();
@@ -1985,24 +2007,30 @@ public sealed class CreateRecipeVersionHandlerTests
 **File:** `tests/Nastart.Application.Tests/Features/Recipes/UpdateRecipeHandlerTests.cs`
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Features.Recipes.Commands.UpdateRecipe;
+using Nastart.Application.Tests.Infrastructure;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
 [TestClass]
 public sealed class UpdateRecipeHandlerTests
 {
+    private static readonly PostgreSqlTestDatabase Database = new();
+
+    [ClassInitialize]
+    public static Task ClassInitialize(TestContext _) => Database.InitializeAsync();
+
+    [ClassCleanup]
+    public static Task ClassCleanup() => Database.DisposeAsync().AsTask();
+
     [TestMethod]
     public async Task Handle_PortionCountChanged_TriggersCascadePerUniqueIngredient()
     {
         // Arrange
-        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await using var db = await Database.CreateDbContextAsync();
 
         var userId = Guid.NewGuid();
         var recipeId = Guid.NewGuid();
@@ -2043,8 +2071,7 @@ public sealed class UpdateRecipeHandlerTests
     public async Task Handle_PortionCountUnchanged_DoesNotTriggerCascade()
     {
         // Arrange
-        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await using var db = await Database.CreateDbContextAsync();
 
         var userId = Guid.NewGuid();
         var recipeId = Guid.NewGuid();
@@ -2079,24 +2106,30 @@ public sealed class UpdateRecipeHandlerTests
 
 ```csharp
 using ErrorOr;
-using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Nastart.Application.Common.Interfaces;
 using Nastart.Application.Features.Recipes.Commands.AddRecipeItem;
+using Nastart.Application.Tests.Infrastructure;
 using Nastart.Domain.Entities;
-using Nastart.Infrastructure.Persistence;
 
 namespace Nastart.Application.Tests.Features.Recipes;
 
 [TestClass]
 public sealed class AddRecipeItemHandlerTests
 {
+    private static readonly PostgreSqlTestDatabase Database = new();
+
+    [ClassInitialize]
+    public static Task ClassInitialize(TestContext _) => Database.InitializeAsync();
+
+    [ClassCleanup]
+    public static Task ClassCleanup() => Database.DisposeAsync().AsTask();
+
     [TestMethod]
     public async Task Handle_DuplicateIngredient_ReturnsConflict()
     {
         // Arrange
-        using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await using var db = await Database.CreateDbContextAsync();
 
         var userId = Guid.NewGuid();
         var recipeId = Guid.NewGuid();
