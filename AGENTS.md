@@ -104,6 +104,8 @@ npm test
 - For ASP.NET Core Minimal API work, load the relevant `dotnet-aspnet` skill before implementing endpoint-specific behavior.
 - For EF Core query or persistence work, load `.github/skills/dotnet-skills/dotnet-data/skills/optimizing-ef-core-queries/SKILL.md` and keep PostgreSQL/Npgsql behavior in mind.
 - For test execution, load `.github/skills/dotnet-skills/dotnet-test/skills/run-tests/SKILL.md`; detect VSTest vs Microsoft.Testing.Platform before choosing `dotnet test` syntax.
+- For new MSTest-based .NET 10 test projects, prefer `MSTest.Sdk` v4+ with Microsoft.Testing.Platform instead of the older `Microsoft.NET.Sdk` + `MSTest.*` + `Microsoft.NET.Test.Sdk` stack unless a tool explicitly requires VSTest compatibility.
+- If the repo opts into Microsoft.Testing.Platform in `global.json`, use native .NET 10 syntax (`dotnet test --project ...` / `--solution ...`) and do not mix VSTest and MTP test projects in the same solution.
 - For SDK/runtime migrations, load the applicable `dotnet-upgrade` skill and follow .NET 10 breaking-change guidance.
 - Target .NET 10 (`net10.0`) and C# 14-compatible code. Prefer current .NET 10 approaches when they do not conflict with the project architecture.
 - Use `WebApplication.CreateBuilder`, ASP.NET Core Minimal APIs, endpoint groups, typed contracts, dependency injection, async I/O, and cancellation tokens for request/database work.

@@ -1641,7 +1641,7 @@ Across L6–L8, you now have:
 
 ## 15. Testing Recipe Handlers
 
-> Use MSTest 3.x with PostgreSQL Testcontainers for any handler test that touches `DbContext`, query translation, or relational behavior. Reuse the `PostgreSqlTestDatabase` fixture introduced in L7. Keep pure arithmetic checks such as `DerivedSellPriceTests` as no-database unit tests. Assert on **response values** (`CostPerPortion`, recipe name, `DerivedSellPrice`) — not on mock call counts.
+> Use MSTest v4 with PostgreSQL Testcontainers for any handler test that touches `DbContext`, query translation, or relational behavior. Reuse the `PostgreSqlTestDatabase` fixture and the `MSTest.Sdk` + Microsoft.Testing.Platform (MTP) project setup introduced in L7. Keep pure arithmetic checks such as `DerivedSellPriceTests` as no-database unit tests. Assert on **response values** (`CostPerPortion`, recipe name, `DerivedSellPrice`) — not on mock call counts.
 
 ### Key Test Cases
 
@@ -1799,7 +1799,8 @@ public sealed class DerivedSellPriceTests
 ```
 
 > **Key principles:**
-> - **Sealed test classes** — used here for consistency; MSTest 3.x does not require sealing
+> - **Sealed test classes** — used here for consistency; MSTest v4 does not require sealing
+> - **`MSTest.Sdk` + MTP** — reuse the L7 .NET 10 test-project setup here; if the repo opts into MTP in `global.json`, prefer `dotnet test --project ...` over older positional/VSTest examples
 > - **`[DataRow]` for formula tests** — same formula, different inputs: data-driven over copy-paste tests
 > - **Assert on values** — check `CostPerPortion`, `DerivedSellPrice`, and recipe scoping; never assert on cascade mock invocation counts
 > - **Isolate formula tests** — `DerivedSellPriceTests` has no DB dependency; it's fast and deterministic

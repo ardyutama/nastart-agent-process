@@ -1254,13 +1254,29 @@ public static IServiceCollection AddInfrastructure(
 
 > Follow the repo's TDD loop for every behavior in this lesson: write the smallest failing test first, run that targeted test to confirm the failure, implement the minimum fix, rerun the targeted test, then run the broader test project as verification.
 >
-> Use MSTest 3.x with PostgreSQL Testcontainers for any test that exercises `AppDbContext`, EF Core query translation, migrations, defaults, precision, or relational constraints. Keep pure unit tests for arithmetic-only logic. Use NSubstitute only for external ports such as `IAlertDispatcher` and `ILogger<T>`. Assert on **outcome values** (`CostPerPortion`, `CascadeResult` counts, `CascadeErrorLog` presence) — not on mock call counts.
+> Use MSTest v4 with PostgreSQL Testcontainers for any test that exercises `AppDbContext`, EF Core query translation, migrations, defaults, precision, or relational constraints. For new .NET 10 MSTest projects, prefer `MSTest.Sdk` running on Microsoft.Testing.Platform (MTP) instead of the older VSTest-first package stack. Keep pure unit tests for arithmetic-only logic. Use NSubstitute only for external ports such as `IAlertDispatcher` and `ILogger<T>`. Assert on **outcome values** (`CostPerPortion`, `CascadeResult` counts, `CascadeErrorLog` presence) — not on mock call counts.
 >
 > **Why Testcontainers instead of EF Core InMemory?** The `latestPrices` batch query uses `GroupBy + OrderBy + Select + ToDictionaryAsync`, and `PriceSpikeChecker` relies on provider-accurate ordering via `Skip(1)`. EF Core InMemory cannot validate PostgreSQL SQL translation, migrations, defaults, or relational behavior. A PostgreSQL 18 Testcontainer executes the real Npgsql provider and makes these tests portable across machines with a local container runtime.
 >
 > **Prerequisite:** Docker Desktop, Rancher Desktop, or Podman with a Docker-compatible socket must be available before `dotnet test`. If the container runtime is unavailable, report that blocker instead of silently falling back to EF Core InMemory.
 
 ### Project Setup
+
+Pin the repo's chosen .NET 10 SDK, the MSTest SDK version, and the native .NET 10 test runner at the repo root:
+
+```json
+{
+    "sdk": {
+        "version": "10.0.100"
+    },
+    "msbuild-sdks": {
+        "MSTest.Sdk": "4.1.0"
+    },
+    "test": {
+        "runner": "Microsoft.Testing.Platform"
+    }
+}
+```
 
 ```xml
 <!-- tests/Nastart.Application.Tests/Nastart.Application.Tests.csproj -->
@@ -1281,6 +1297,14 @@ public static IServiceCollection AddInfrastructure(
   </ItemGroup>
 </Project>
 ```
+
+> `MSTest.Sdk` uses the MSTest runner on Microsoft.Testing.Platform by default. For a new .NET 10 MSTest project, do not add `Microsoft.NET.Test.Sdk` unless you intentionally need VSTest compatibility.
+>
+> With the `global.json` runner above, use the native .NET 10 CLI form:
+>
+> ```bash
+> dotnet test --project tests/Nastart.Application.Tests/Nastart.Application.Tests.csproj
+> ```
 
 ### Shared PostgreSQL Fixture
 
@@ -1795,7 +1819,8 @@ public sealed class PriceSpikeCheckerTests
 ```
 
 > **Key principles:**
-> - **Sealed test classes** with `[TestClass]` — used here for consistency; MSTest 3.x does not require sealing
+> - **Sealed test classes** with `[TestClass]` — used here for consistency; MSTest v4 does not require sealing
+> - **`MSTest.Sdk` + MTP** — current MSTest-first setup for new .NET 10 projects; if the repo opts into MTP in `global.json`, prefer `dotnet test --project ...` over older positional/VSTest examples
 > - **`CostCascadeService` constructor** takes only `db + logger` (no `IAlertDispatcher` — moved to `PriceSpikeChecker`)
 > - **`IngredientPriceHistory.UnitSize`** populated in every test so the price and package-size snapshot stay together
 > - **`[DynamicData]`** for the parameterized C-2 formula scenarios — covers three formula configurations in one test method
