@@ -3,13 +3,13 @@
 > **What you'll learn:**
 > - Why `CostPerPortion` is server-authoritative and never computed by the client
 > - The cascade architecture: triggering automatic recalculation when ingredient prices change
-> - A unified response DTO: single user sees all fields including derived sell price
+> - A unified financial response contract: single user sees all recipe financial fields with no role-split DTOs
 > - 7 complete vertical slices for recipe creation, modification, and versioning
 > - How to implement the canonical cost formula (C-2) and the sell price formula
 >
 > **Out of scope for this lesson:**
 > - **Async/deferred cascade** — Phase 4+. Currently cascade runs synchronously. Future: queue-based async with retries.
-> - **Telegram threshold alerts** — deferred to L15. L7 handles price-spike detection through `IPriceSpikeChecker`; Telegram delivery is Phase 4.
+> - **Recipe cost threshold alerts** — out of v1 scope. L7 only handles ingredient price-spike detection through `IPriceSpikeChecker`; recipe handlers do not dispatch alerts.
 
 > **Prerequisites — L7 price-history unit-size snapshot**
 >
@@ -34,7 +34,7 @@
 > // DELETE RecipeOwnerResponse — no longer needed
 > // DELETE RecipeStandardResponse — no longer needed
 >
-> // v1: single DTO, single user sees everything
+> // v1: one shared recipe financial shape, single user sees everything
 > public record RecipeResponse(
 >     Guid Id,
 >     string Name,
@@ -42,12 +42,15 @@
 >     decimal CostPerPortion,
 >     decimal PackagingCost,       // new v1 field
 >     decimal TargetMargin,        // new v1 field (e.g. 0.40 = 40%)
->     decimal? DerivedSellPrice,   // computed: (CostPerPortion + PackagingCost) / (1 - TargetMargin); null if TargetMargin == 1
+>     decimal? DerivedSellPrice,   // computed: (CostPerPortion + PackagingCost) / (1 - TargetMargin); null if persisted TargetMargin >= 1
 >     decimal? FoodCostPct,        // computed: (CostPerPortion / DerivedSellPrice) * 100; null if no sell price
 >     int VersionNumber,
 >     string VersionLabel,
 >     Guid VersionGroupId
 > );
+>
+> // Detail endpoints may add an Items collection via a separate RecipeDetailResponse.
+> // This is detail expansion, not role-based field stripping.
 > ```
 >
 > **Sell price computation in handler (derived at read time, never stored):**
@@ -122,9 +125,9 @@ Client receives:
 
 ---
 
-## 2. Unified Response DTO — One User, One View
+## 2. Unified Financial Contract — One User, One View
 
-> **v1 note:** The role-split DTO pattern (RecipeOwnerResponse vs RecipeStandardResponse) was designed for multi-role systems. v1 is single-user: there are no roles, and the single user sees all fields. Use one unified DTO.
+> **v1 note:** The role-split DTO pattern (RecipeOwnerResponse vs RecipeStandardResponse) was designed for multi-role systems. v1 is single-user: there are no roles, and the single user sees all financial fields. Keep one shared recipe financial shape, and let detail endpoints add item details without reintroducing role-split DTOs.
 
 **Bad approach — nullable fields:**
 
@@ -143,7 +146,7 @@ Why this is bad (same reasoning applies in both single-user and multi-user desig
 - Inconsistent UI: sometimes the field renders, sometimes it's null. Not a clean API contract
 - Harder to debug: the developer sees two code paths for no benefit in a single-user system
 
-**v1 approach — one unified DTO, all fields always present:**
+**v1 approach — one shared financial DTO, all financial fields always present:**
 
 ```csharp
 // v1: single authenticated user sees all fields
@@ -161,6 +164,8 @@ public record RecipeResponse(
     Guid VersionGroupId
 );
 ```
+
+For detail endpoints, use a separate `RecipeDetailResponse` that adds `Items` while keeping the same financial fields. That mirrors the L6 summary-vs-detail pattern without reintroducing role-based DTO stripping.
 
 **In the handler — compute derived fields at read time (never store them):**
 
@@ -289,7 +294,7 @@ public class CreateRecipeCommandValidator : AbstractValidator<CreateRecipeComman
             .GreaterThanOrEqualTo(1).WithMessage("Portion count must be at least 1.");
 
         RuleFor(x => x.PackagingCost).GreaterThanOrEqualTo(0);
-        RuleFor(x => x.TargetMargin).InclusiveBetween(0m, 0.99m).WithMessage("Target margin must be between 0% and 99%.");
+        RuleFor(x => x.TargetMargin).InclusiveBetween(0m, 0.99m).WithMessage("Target margin must be between 0% and 99% for user input.");
 
         RuleFor(x => x.RecipeItems)
             .NotEmpty().WithMessage("Recipe must have at least one item.")
@@ -322,7 +327,7 @@ public sealed class CreateRecipeHandler(IAppDbContext db, ICostCascadeService ca
     {
         // Business rule: Prevent duplicate recipe names within the user's scope
         var isDuplicate = await db.Recipes
-            .AnyAsync(r => r.UserId == command.UserId && r.Name == command.Name, ct)
+            .AnyAsync(r => r.UserId == command.UserId && EF.Functions.ILike(r.Name, command.Name), ct)
             .ConfigureAwait(false);
 
         if (isDuplicate)
@@ -529,7 +534,7 @@ using MediatR;
 namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 
 public record GetRecipeByIdQuery(Guid RecipeId, Guid UserId)
-    : IRequest<ErrorOr<RecipeResponse>>;
+    : IRequest<ErrorOr<RecipeDetailResponse>>;
 ```
 
 ### Responses
@@ -549,7 +554,7 @@ public record RecipeItemDetail(
 );
 ```
 
-**File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipeById/RecipeByIdOwnerResponse.cs`
+**File:** `src/Nastart.Application/Features/Recipes/Queries/GetRecipeById/RecipeDetailResponse.cs`
 
 ```csharp
 namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
@@ -561,8 +566,8 @@ namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 // v2-only — RecipeByIdStandardResponse: role-split standard DTO removed in v1.
 //   In v2, chefs/procurement see limited fields (no financials). Use unified RecipeResponse for v1.
 
-// v1: single authenticated user sees all fields including item details
-public record RecipeResponse(
+// v1: separate detail DTO adds Items without changing the shared financial field set
+public record RecipeDetailResponse(
     Guid Id,
     string Name,
     int PortionCount,
@@ -571,7 +576,7 @@ public record RecipeResponse(
     decimal TargetMargin,
     decimal? DerivedSellPrice,
     decimal? FoodCostPct,
-    IReadOnlyList<RecipeItemDetail> Items,  // populated by GetRecipeByIdHandler; absent from list endpoint
+    IReadOnlyList<RecipeItemDetail> Items,
     int VersionNumber,
     string VersionLabel,
     Guid VersionGroupId
@@ -591,9 +596,9 @@ using Nastart.Application.Common.Interfaces;
 namespace Nastart.Application.Features.Recipes.Queries.GetRecipeById;
 
 public sealed class GetRecipeByIdHandler(IAppDbContext db)
-    : IRequestHandler<GetRecipeByIdQuery, ErrorOr<RecipeResponse>>
+    : IRequestHandler<GetRecipeByIdQuery, ErrorOr<RecipeDetailResponse>>
 {
-    public async Task<ErrorOr<RecipeResponse>> Handle(
+    public async Task<ErrorOr<RecipeDetailResponse>> Handle(
         GetRecipeByIdQuery query, CancellationToken ct)
     {
         var recipe = await db.Recipes
@@ -642,7 +647,7 @@ public sealed class GetRecipeByIdHandler(IAppDbContext db)
             ? (recipe.CostPerPortion / derivedSellPrice.Value) * 100m
             : null;
 
-        return new RecipeResponse(
+        return new RecipeDetailResponse(
             recipe.Id, recipe.Name, recipe.PortionCount,
             recipe.CostPerPortion, recipe.PackagingCost, recipe.TargetMargin,
             derivedSellPrice, foodCostPct,
@@ -1112,7 +1117,7 @@ public class UpdateRecipeCommandValidator : AbstractValidator<UpdateRecipeComman
             .GreaterThanOrEqualTo(1).WithMessage("Portion count must be at least 1.");
 
         RuleFor(x => x.PackagingCost).GreaterThanOrEqualTo(0);
-        RuleFor(x => x.TargetMargin).InclusiveBetween(0m, 0.99m).WithMessage("Target margin must be between 0% and 99%.");
+        RuleFor(x => x.TargetMargin).InclusiveBetween(0m, 0.99m).WithMessage("Target margin must be between 0% and 99% for user input.");
     }
 }
 ```
@@ -1148,7 +1153,7 @@ public sealed class UpdateRecipeHandler(IAppDbContext db, ICostCascadeService ca
         if (recipe.Name != command.Name)
         {
             var isDuplicate = await db.Recipes
-                .AnyAsync(r => r.UserId == command.UserId && r.Name == command.Name && r.Id != command.RecipeId, ct)
+                .AnyAsync(r => r.UserId == command.UserId && EF.Functions.ILike(r.Name, command.Name) && r.Id != command.RecipeId, ct)
                 .ConfigureAwait(false);
 
             if (isDuplicate)
@@ -1266,38 +1271,31 @@ public static class RecipeEndpoints
 
         // GET /api/recipes — all recipes for user
         group.MapGet("/", GetRecipes)
-            .WithName("GetRecipes")
-            .WithOpenApi();
+            .WithName("GetRecipes");
 
         // POST /api/recipes — create recipe
         group.MapPost("/", CreateRecipe)
-            .WithName("CreateRecipe")
-            .WithOpenApi();
+            .WithName("CreateRecipe");
 
         // GET /api/recipes/{recipeId} — single recipe with items
         group.MapGet("/{recipeId}", GetRecipeById)
-            .WithName("GetRecipeById")
-            .WithOpenApi();
+            .WithName("GetRecipeById");
 
         // PUT /api/recipes/{recipeId} — update metadata
         group.MapPut("/{recipeId}", UpdateRecipe)
-            .WithName("UpdateRecipe")
-            .WithOpenApi();
+            .WithName("UpdateRecipe");
 
         // POST /api/recipes/{recipeId}/items — add item
         group.MapPost("/{recipeId}/items", AddRecipeItem)
-            .WithName("AddRecipeItem")
-            .WithOpenApi();
+            .WithName("AddRecipeItem");
 
         // DELETE /api/recipes/{recipeId}/items/{recipeItemId} — remove item
         group.MapDelete("/{recipeId}/items/{recipeItemId}", RemoveRecipeItem)
-            .WithName("RemoveRecipeItem")
-            .WithOpenApi();
+            .WithName("RemoveRecipeItem");
 
         // POST /api/recipes/{recipeId}/versions — create version
         group.MapPost("/{recipeId}/versions", CreateRecipeVersion)
-            .WithName("CreateRecipeVersion")
-            .WithOpenApi();
+            .WithName("CreateRecipeVersion");
 
         // v2-only: outlet-scoped routes (/api/outlets/{outletId}/recipes) will replace
         // these flat routes when multi-tenant scoping is introduced in v2.

@@ -172,9 +172,9 @@ sell_price = (CostPerPortion + PackagingCost) / (1 - TargetMargin)
 
 - **Derived at read time in the API handler** — never stored in the database
 - `PackagingCost`: flat dollar add-on per portion entered by the user (e.g. $0.45 for box + label)
-- `TargetMargin`: decimal 0.0–0.99 (e.g. 0.40 = 40% margin)
+- `TargetMargin`: validated user input is decimal 0.0–0.99 (e.g. 0.40 = 40% margin)
 - If `TargetMargin == 0`, sell price = ingredient cost + packaging (no margin applied)
-- If `TargetMargin >= 1`, return `null` (don't divide by zero or negative)
+- If persisted `TargetMargin >= 1`, return `null` defensively (don't divide by zero or negative)
 
 **In handler code:**
 ```csharp
@@ -205,7 +205,7 @@ decimal? foodCostPct = derivedSellPrice.HasValue && derivedSellPrice.Value > 0
 
 ## Response DTOs — v1
 
-**Recipes:** Single unified DTO — the user sees all fields (no role-split):
+**Recipes:** No role-split DTOs — the user sees the full shared financial field set:
 ```csharp
 public record RecipeResponse(
     Guid Id,
@@ -221,6 +221,8 @@ public record RecipeResponse(
     Guid VersionGroupId
 );
 ```
+
+Detail endpoints may add an `Items` collection through a separate `RecipeDetailResponse`, but they must keep the same financial fields and must not reintroduce owner-vs-standard DTO splitting.
 
 **Never build in v1:** `RecipeOwnerResponse`, `RecipeStandardResponse`, `RecipeByIdOwnerResponse`, `RecipeByIdStandardResponse` — these are role-split DTOs from the enterprise design.
 

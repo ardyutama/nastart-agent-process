@@ -27,7 +27,7 @@ cost_per_portion = SUM(
 ```
 
 - `current_price` — fetched via C-3
-- `unit_size` — from `Ingredient.unit_size`
+- `unit_size` — from the latest `IngredientPriceHistory.unit_size` snapshot paired with `current_price`
 - `quantity` — from `RecipeItem.quantity`
 - `yield_percentage` — from `RecipeItem.yield_percentage`
 - `portion_count` — from `Recipe.portion_count`

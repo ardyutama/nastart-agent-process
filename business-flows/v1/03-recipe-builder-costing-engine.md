@@ -16,7 +16,7 @@
 - `CostPerPortion` is computed by the server and never accepted from the client
 - `PackagingCost` and `TargetMargin` are stored inputs in v1
 - `DerivedSellPrice` and `FoodCostPct` are computed in read handlers
-- `RecipeResponse` is unified for the single user; there are no role-split DTOs
+- Recipe financial fields are unified for the single user; detail endpoints may add item details through a separate detail DTO, but there are no role-split DTOs
 - Recipe versioning remains active through `VersionGroupId`, `VersionNumber`, and `VersionLabel`
 
 ---
@@ -36,6 +36,7 @@ derived_sell_price = (CostPerPortion + PackagingCost) / (1 - TargetMargin)
 ```
 
 If `TargetMargin >= 1`, derived sell price is `null`.
+Validated user input still caps `TargetMargin` at `0.99`; the `>= 1` rule keeps read handlers defensive if invalid or legacy data exists.
 
 ---
 
@@ -75,7 +76,7 @@ If `TargetMargin >= 1`, derived sell price is `null`.
 | 5 | Nastart.Api | Returns unified response DTOs | Nastart.Api | Recipe + computed values | `RecipeResponse` | - | - |
 | 6 | Vue.js | Renders list or detail view | Vue.js | `RecipeResponse` | recipe cards/detail | - | Empty state if no recipes exist |
 
-**Unified v1 response fields:**
+**Shared recipe financial fields:**
 - `Id`
 - `Name`
 - `PortionCount`
@@ -87,6 +88,8 @@ If `TargetMargin >= 1`, derived sell price is `null`.
 - `VersionNumber`
 - `VersionLabel`
 - `VersionGroupId`
+
+Recipe detail responses may add `Items` on top of this shared financial field set.
 
 ---
 
@@ -152,6 +155,8 @@ If `TargetMargin >= 1`, derived sell price is `null`.
 | Get recipe by id | `GET /api/recipes/{id}` | `.RequireAuthorization()` |
 | Create recipe | `POST /api/recipes` | `.RequireAuthorization()` |
 | Update recipe | `PUT /api/recipes/{id}` | `.RequireAuthorization()` |
+| Add recipe item | `POST /api/recipes/{id}/items` | `.RequireAuthorization()` |
+| Remove recipe item | `DELETE /api/recipes/{id}/items/{recipeItemId}` | `.RequireAuthorization()` |
 | Create new version | `POST /api/recipes/{id}/versions` | `.RequireAuthorization()` |
 
 ---
