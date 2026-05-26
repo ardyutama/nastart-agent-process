@@ -244,10 +244,10 @@ public record CreateRecipeCommand(
     Guid UserId,
     string Name,
     int PortionCount,
+    IReadOnlyList<CreateRecipeItemDto> RecipeItems,
     decimal PackagingCost = 0m,
     decimal TargetMargin = 0m,
-    string VersionLabel = "Standard",
-    IReadOnlyList<CreateRecipeItemDto> RecipeItems
+    string VersionLabel = "Standard"
 ) : IRequest<ErrorOr<CreateRecipeResponse>>;
 
 public record CreateRecipeItemDto(Guid IngredientId, decimal Quantity, decimal YieldPercentage);
@@ -1278,23 +1278,30 @@ public static class RecipeEndpoints
             .WithName("CreateRecipe");
 
         // GET /api/recipes/{recipeId} — single recipe with items
-        group.MapGet("/{recipeId}", GetRecipeById)
+        group.MapGet("/{recipeId:guid}", GetRecipeById)
             .WithName("GetRecipeById");
 
         // PUT /api/recipes/{recipeId} — update metadata
-        group.MapPut("/{recipeId}", UpdateRecipe)
+        group.MapPut("/{recipeId:guid}", UpdateRecipe)
             .WithName("UpdateRecipe");
 
+        // Item sub-routes stay nested under the recipe for consistency with L6's prices group.
+        var itemsGroup = group.MapGroup("/{recipeId:guid}/items")
+            .WithTags("Recipe Items");
+
         // POST /api/recipes/{recipeId}/items — add item
-        group.MapPost("/{recipeId}/items", AddRecipeItem)
+        itemsGroup.MapPost("/", AddRecipeItem)
             .WithName("AddRecipeItem");
 
         // DELETE /api/recipes/{recipeId}/items/{recipeItemId} — remove item
-        group.MapDelete("/{recipeId}/items/{recipeItemId}", RemoveRecipeItem)
+        itemsGroup.MapDelete("/{recipeItemId:guid}", RemoveRecipeItem)
             .WithName("RemoveRecipeItem");
 
+        var versionsGroup = group.MapGroup("/{recipeId:guid}/versions")
+            .WithTags("Recipe Versions");
+
         // POST /api/recipes/{recipeId}/versions — create version
-        group.MapPost("/{recipeId}/versions", CreateRecipeVersion)
+        versionsGroup.MapPost("/", CreateRecipeVersion)
             .WithName("CreateRecipeVersion");
 
         // v2-only: outlet-scoped routes (/api/outlets/{outletId}/recipes) will replace
@@ -1322,11 +1329,11 @@ public static class RecipeEndpoints
             userId,
             request.Name,
             request.PortionCount,
+            request.RecipeItems.Select(r => new CreateRecipeItemDto(
+                r.IngredientId, r.Quantity, r.YieldPercentage)).ToArray(),
             request.PackagingCost,
             request.TargetMargin,
-            request.VersionLabel,
-            request.RecipeItems.Select(r => new CreateRecipeItemDto(
-                r.IngredientId, r.Quantity, r.YieldPercentage)).ToArray()
+            request.VersionLabel
         );
 
         var result = await sender.Send(command, ct);
@@ -1730,8 +1737,9 @@ public sealed class CreateRecipeHandlerTests
 
         var handler = new CreateRecipeHandler(db, cascadeStub);
         var command = new CreateRecipeCommand(
-            userId, "My Brownie Box", 12, 0.30m, 0.35m, "Standard",
-            [new CreateRecipeItemDto(ingredientId, 500m, 1.0m)]);
+            userId, "My Brownie Box", 12,
+            [new CreateRecipeItemDto(ingredientId, 500m, 1.0m)],
+            0.30m, 0.35m, "Standard");
 
         // Act
         var result = await handler.Handle(command, CancellationToken.None);
