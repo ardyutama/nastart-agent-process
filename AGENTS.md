@@ -185,6 +185,7 @@ npm test
 | Flow routing / overview | + `business-flows/00-index.md` + `business-flows/v1/README.md` |
 | Auth / Telegram linking | + `business-flows/v1/01-auth-telegram-linking.md` + `lessons/L5-jwt-auth-and-role-authorization.md` |
 | .NET backend work | + relevant `.github/skills/dotnet-skills/` docs before implementing |
+| Backend observability | + `.github/skills/observability-and-instrumentation/SKILL.md` + `lessons/L9-backend-observability-with-victoriametrics.md` |
 | Business logic changes | + `.github/skills/test-driven-development/SKILL.md` before implementation |
 | Phase 1 schema work | + `lessons/L2-ef-core-postgresql-schema.md` + `.github/context/phase-1-session.md` |
 | Ingredient feature | + `business-flows/v1/02-ingredient-price-management.md` + `lessons/L6-ingredient-management-and-price-history.md` |

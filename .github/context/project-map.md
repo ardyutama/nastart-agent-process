@@ -28,7 +28,7 @@ nastart-agent-process/              ← current workspace: planning, context, le
 │       └── 2026-05-14-versioned-business-flows-implementation-plan.md
 ├── archive/
 │   └── legacy-flows/              ← Retired draft flow files kept only for historical reference
-├── lessons/                        ← Step-by-step build lessons L1–L8
+├── lessons/                        ← Step-by-step build lessons L1–L9
 ├── business-flows/                 ← Versioned flow root: v1 active, v2-reference historical
 ├── personas/                       ← User persona research
 ```
@@ -83,6 +83,7 @@ Sequential build lessons. v1 solopreneur amendments have been applied to all.
 | `L6-ingredient-management-and-price-history.md` | Ingredient CRUD, price history (7 slices) | ✅ Amended — fully user-scoped |
 | `L7-cost-cascade-service-and-price-spike-alerts.md` | CostCascadeService, cascade formula, alerts | ✅ Amended — UserId, PackagingCost, TargetMargin |
 | `L8-recipe-builder-and-costing-engine.md` | Recipe slices, sell price, unified DTO | ✅ Amended — no role-split DTOs |
+| `L9-backend-observability-with-victoriametrics.md` | OpenTelemetry logs, metrics, traces, VictoriaMetrics products, alerts | ✅ v1-ready — backend-first, no product/schema scope changes |
 
 **How to use lessons:** Follow lessons sequentially. Every `⚠️ v2-only` callout in a lesson body = skip that block. The amendment block at the top of each lesson summarizes all changes. If an older lesson snippet still shows `RecipeCost.*` or `Nastart.API`, translate it to `Nastart.*` and `Nastart.Api`.
 
@@ -158,11 +159,12 @@ business-flows/00-index.md
   └─ preserves → business-flows/v2-reference/        (historical enterprise reference)
 
 Lessons
-  L1 → L2 → L3 → L4 → L5 → L6 → L7 → L8
+  L1 → L2 → L3 → L4 → L5 → L6 → L7 → L8 → L9
   Each lesson builds on the previous.
   L2 establishes entities used in L3–L8.
   L5 establishes auth used in L6–L8.
   L7 establishes cascade service used in L8.
+  L9 makes the backend operationally observable without changing v1 business rules.
 ```
 
 ---

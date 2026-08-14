@@ -12,7 +12,7 @@ This repo documents how GitHub Copilot agents were used systematically — from 
 
 | Folder | Contents |
 |---|---|
-| [`lessons/`](lessons/) | 8 lessons covering Clean Architecture, EF Core schema, CQRS with MediatR, validation, JWT auth, ingredient management, cost cascade, and recipe costing engine |
+| [`lessons/`](lessons/) | 9 lessons covering Clean Architecture, EF Core schema, CQRS with MediatR, validation, JWT auth, ingredient management, cost cascade, recipe costing, and backend observability |
 | [`business-flows/`](business-flows/) | Canonical flow root; use `business-flows/v1/` for active implementation guidance and `business-flows/v2-reference/` only for historical enterprise reference |
 | [`personas/`](personas/) | Target user research — home bakers, F&B owners, head chefs, procurement, cost controllers |
 | [`archive/legacy-flows/`](archive/legacy-flows/) | Retired draft flow docs preserved only for historical comparison; not active implementation guidance |
@@ -83,6 +83,7 @@ Skills are composable — a session may invoke several in sequence. The `using-a
 | Frontend | Vue 3 + Vite + TypeScript |
 | Database | PostgreSQL 18 + EF Core |
 | Auth | JWT (`userId` + `email` claims only in v1) |
+| Backend observability | OpenTelemetry → Collector → VictoriaMetrics, VictoriaLogs, VictoriaTraces, vmagent, vmalert |
 | File Storage | MiniStack (local) → Cloudflare R2 (VPS) → AWS S3 (future) |
 | Deployment | Docker Compose → VPS |
 
